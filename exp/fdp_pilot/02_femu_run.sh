@@ -38,17 +38,37 @@ fi
 if ! python3 "$HERE/pilot.py" counters >/dev/null; then
   echo "장치 카운터를 못 읽었어요. config.env 의 COUNTER_METHOD / COUNTER_CMD 를 확인하세요."; exit 1
 fi
+if [[ "$RUH_METHOD" == "femu" ]] && ! python3 "$HERE/pilot.py" usage >/dev/null; then
+  echo "FEMU 사용량 로그(C1h)를 못 읽었어요. 이 브랜치(fdp-pilot)의 FEMU로 띄웠는지, NVME_DEV 를 확인하세요."; exit 1
+fi
+# PID 0 ~ NUM_PIDS-1 이 쓰는 RUH의 격리 방식이 EXPECT_RUHT 인지 (원본 FEMU의 isolation_mode=1 은
+# 마지막 RUH만 II 라서, 그대로 띄우면 데이터 RUH는 PI 가 돼요)
+if [[ "${EXPECT_RUHT:-any}" != "any" ]]; then
+  RUHT=$(python3 "$HERE/pilot.py" ruhtypes) || { echo "FDP 설정 로그를 못 읽었어요 ('nvme fdp configs')."; exit 1; }
+  BAD=$(awk -v want="$EXPECT_RUHT" -v n="$NUM_PIDS" '$1 < n && $2 != want' <<< "$RUHT")
+  if [[ -n "$BAD" ]]; then
+    echo "PID 0–$((NUM_PIDS-1)) 가 쓰는 RUH가 $EXPECT_RUHT 가 아니에요. FEMU를 fdp.isolation_mode 맞게 띄웠는지 확인하세요:"
+    echo "$RUHT"; exit 1
+  fi
+fi
 
 sample() {   # $1 = run 폴더
   local d="$1" ph ts
   ph=$(cat "$d/phase" 2>/dev/null || echo end); ts=$(date +%s)
   read -r H M < <(python3 "$HERE/pilot.py" counters)
   echo "$ts,$ph,$H,$M" >> "$d/counters.csv"
-  if [[ "$RUH_METHOD" != "none" ]]; then
-    python3 "$HERE/pilot.py" ruh 2>/dev/null | while read -r pid val; do
-      echo "$ts,$ph,$pid,$val" >> "$d/ruh.csv"
-    done
-  fi
+  case "$RUH_METHOD" in
+    femu)   # 실제 사용률과 RUH별 쓰기량을 한 번에 (첫 줄 = 유효 데이터·용량, 다음 줄부터 RUH별)
+      python3 "$HERE/pilot.py" usage 2>/dev/null | {
+        read -r V C && echo "$ts,$ph,$V,$C" >> "$d/usage.csv"
+        while read -r pid hb mb live; do echo "$ts,$ph,$pid,$hb,$mb,$live" >> "$d/ruh_usage.csv"; done
+      } || true ;;
+    none) ;;
+    *)
+      python3 "$HERE/pilot.py" ruh 2>/dev/null | while read -r pid val; do
+        echo "$ts,$ph,$pid,$val" >> "$d/ruh.csv"
+      done ;;
+  esac
 }
 
 for POL in $POLICIES; do
@@ -72,14 +92,22 @@ for POL in $POLICIES; do
 
     N=$(python3 "$HERE/pilot.py" get "$U" N)
     W=$(python3 "$HERE/pilot.py" get "$U" overwrite_writes_per_thread)
+    # 장치의 LBA 크기 (RUAMW 단위). summary 는 장치가 없는 호스트에서 돌아서 여기 남겨 둬요
+    python3 "$HERE/pilot.py" lbasize > "$RUN/lba_bytes"
+    python3 "$HERE/pilot.py" ruhtypes > "$RUN/ruh_types" 2>/dev/null || echo "읽기 실패" > "$RUN/ruh_types"
     dbbench_common_args "$U"
-    { echo "policy=$POL util=$U N=$N W_per_thread=$W threads=$THREADS"
+    { echo "policy=$POL util=$U N=$N W_per_thread=$W threads=$THREADS lba_bytes=$(cat "$RUN/lba_bytes")"
       echo "TORFS_FORCE_PID=${TORFS_FORCE_PID:-unset} fs_uri=$FS_URI"
       echo "config:"; grep -v '^\s*#' "$HERE/config.env" | grep -v '^\s*$'
       echo "db_args:"; printf '  %s\n' "${DB_ARGS[@]}"; } > "$RUN/meta.txt"
 
     echo "ts,phase,host_bytes,media_bytes" > "$RUN/counters.csv"
-    [[ "$RUH_METHOD" != "none" ]] && echo "ts,phase,pid,value" > "$RUN/ruh.csv"
+    case "$RUH_METHOD" in
+      femu) echo "ts,phase,valid_bytes,capacity_bytes" > "$RUN/usage.csv"
+            echo "ts,phase,ruh,hbmw,mbmw,live_bytes" > "$RUN/ruh_usage.csv" ;;
+      none) ;;
+      *)    echo "ts,phase,pid,value" > "$RUN/ruh.csv" ;;
+    esac
 
     # 3) 샘플러
     echo idle > "$RUN/phase"; sample "$RUN"

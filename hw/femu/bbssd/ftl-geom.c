@@ -146,14 +146,14 @@ uint64_t bb_fdp_forced_units(FemuCtrl *n, uint64_t units)
 /*
  * The units of each reclaim group placement keeps out of the namespace: one
  * open per handle, one more per persistently isolated handle to collect into
- * (the initially isolated handle collects into its open one), and the free
- * units forced collection keeps. @units is the group's pool.
+ * (initially isolated handles collect into the last handle's open one), and
+ * the free units forced collection keeps. @units is the group's pool.
  */
 uint64_t bb_fdp_reserve_units(FemuCtrl *n, uint64_t units)
 {
     uint64_t nruh = n->subsys->endgrp.fdp.nruh;
 
-    return nruh + nruh - (n->subsys->params.fdp.isolation_mode ? 1 : 0) +
+    return nruh + femu_fdp_pi_handles(n->subsys) +
            bb_fdp_forced_units(n, units);
 }
 

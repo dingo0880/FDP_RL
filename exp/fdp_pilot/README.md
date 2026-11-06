@@ -11,7 +11,7 @@
 | 사용률 | 70%, 93% (삭제 대기 파일까지 포함한 최대 사용량 기준) |
 | workload | load(`filluniquerandom`, 키 N개) → overwrite(같은 키를 랜덤으로 덮어쓰기, 데이터의 3배) |
 | 반복 | 1번씩. 판정이 경계(비율 0.4~0.6)면 93% 두 run만 한 번 더 (`REP=2`) |
-| 보는 것 | overwrite 구간의 WAF = media 쓰기 ÷ host 쓰기, RUH별 쓰기 비율 |
+| 보는 것 | overwrite 구간의 WAF = media 쓰기 ÷ host 쓰기, RUH별 쓰기 비율, 장치의 실제 사용률(유효 데이터 ÷ 용량) |
 | 판정 | 이득 = 1 − WAF_lan / WAF_single. 70%에서 이득이 10% 미만이면 **판정 보류**. 아니면 93% 이득 ÷ 70% 이득이 0.5 아래면 "여지 있음" |
 | 공간 여유 | 측정한 공간 증폭 × 1.02로 계산 (93% 목표 → 실제 최고 약 91%) |
 | FEMU 초기화 | run마다 **호스트에서 FEMU를 껐다 켬** (`03_host_loop.sh`) |
@@ -44,6 +44,8 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 ### 호스트 준비 (8번)
 
 - `FEMU_START_CMD`: FEMU를 **앞에서(foreground)** 띄우는 명령이에요. 평소 FEMU 띄우는 스크립트를 그대로 쓰면 돼요. 뒤로 보내는(`&`, daemonize) 방식이면 스크립트가 꺼짐을 못 알아채요.
+- FEMU는 이 브랜치(`fdp-pilot`)에서 빌드한 걸 써야 해요. 사용량 로그(C1h)가 이 브랜치에만 있어요 (아래 "미리 알아 둘 것").
+- FEMU를 `sudo`로 띄우면 호스트에서도 `sudo`가 비밀번호 없이 돼야 해요. qemu가 root 프로세스라 FEMU가 안 꺼질 때 강제 종료를 `sudo -n kill`로 보내요. 그래도 못 끄면 스크립트가 pid를 알려 주고 멈춰요.
 - 게스트 디스크는 재시작 뒤에도 남아 있어야 해요. 결과가 거기에 쌓이기 때문에 QEMU `-snapshot` 모드는 쓰면 안 돼요.
 - 호스트 → 게스트 ssh가 비밀번호 없이 돼야 해요 (`ssh-copy-id`). 게스트에서는 `sudo`도 비밀번호 없이 돼야 해요 (sudoers에 `NOPASSWD`).
 - FDP 설정이 부팅 때마다 필요하면(예: 네임스페이스 만들기) `GUEST_PREP_CMD`에 넣으세요.
@@ -69,11 +71,32 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 
 ## 미리 알아 둘 것
 
-- **장치 카운터:** 기본값은 `nvme fdp stats`(FDP 통계 로그)에서 HBMW(host 쓰기)와 MBMW(media 쓰기)를 읽어요. 우리 FEMU가 이 로그를 지원하지 않으면 `COUNTER_METHOD=custom`으로 바꾸세요. 그리고 FEMU 통계(H0·H1 때 쓴 GC 계측)를 읽어 `host_bytes media_bytes`를 한 줄로 출력하는 명령을 `COUNTER_CMD`에 넣으세요.
-- **RUH별 쓰기:** 기본값은 Lan처럼 `nvme fdp status`의 RUAMW(RU에 남은 쓰기량) 변화로 추정해요. 근사값이라 "PID가 제대로 나뉘어 도착하는지" 확인용으로만 보세요. single은 PID 0만, lan은 0–4가 다 나와야 정상이에요.
+- **장치 카운터:** 기본값은 `nvme fdp stats`(FDP 통계 로그, 22h)에서 HBMW(host 쓰기)와 MBMW(media 쓰기)를 읽어요. 원본 FEMU에 있는 표준 로그예요. 다른 장치에서 이 로그가 없으면 `COUNTER_METHOD=custom`으로 바꾸고, `host_bytes media_bytes`를 한 줄로 출력하는 명령을 `COUNTER_CMD`에 넣으세요.
+- **RUH별 쓰기와 실제 사용률 (`RUH_METHOD=femu`, 기본):** 이 브랜치의 FEMU에 사용량 로그(vendor log C1h, `hw/femu/nvme.h`의 `FemuFdpUsageLog`)를 넣었어요. `nvme get-log --log-id=0xc1`로 읽어요.
+  - RUH마다 host 쓰기량(HBMW), media 쓰기량(MBMW, 그 RUH의 RU를 GC로 옮긴 양 포함), 그 RUH가 가진 RU의 유효 페이지를 정확히 줘요.
+  - 장치 전체의 유효 페이지와 용량도 줘서, 실제 사용률을 바로 계산할 수 있어요.
+  - 필요한 이유 두 가지:
+    - 최신 원본 FEMU는 RUH Usage 로그(21h)를 표준대로 8바이트로 줄였어요(커밋 1bc8508a6). 그래서 RUH별 쓰기량을 볼 길이 없어요.
+    - TorFS는 파일을 지울 때 DEALLOCATE를 백그라운드 스레드가 나중에 보내요. 그래서 장치가 PC 보정값보다 더 찰 수 있어 실제 사용률을 장치에서 직접 재요.
+  - 이 로그는 FEMU qtest `fdp-usage-log`로 확인했어요: query-femu·FDP 통계 로그와 값이 같고, 유효 페이지가 FTL 매핑과 같아요.
+  - single은 PID 0만, lan은 0–4가 다 나와야 정상이에요.
+  - II에서는 GC로 옮긴 데이터가 마지막 RUH의 RU에 모여요. 그래서 그 몫의 유효 페이지는 마지막 RUH에 잡히고, media 쓰기량은 GC당한 원래 RUH에 잡혀요.
+- **RUAMW 방식 (`RUH_METHOD=fdpstatus`):** 실제 FDP SSD처럼 이 로그가 없을 때 쓰는 근사예요. `nvme fdp status`의 RUAMW 변화로 추정해요.
+  - RUAMW는 LBA 단위예요. LBA 크기는 run마다 `nvme id-ns`로 읽어 run 폴더의 `lba_bytes`에 남기고, summary가 그 값을 써요.
+  - FEMU 기본은 512 B이고 실제 FDP SSD는 보통 4 KiB예요. 못 읽으면 `config.env`의 `LBA_BYTES`를 써요.
+  - 샘플 사이에 RU를 두 개 넘게 쓰면 덜 세요.
+- **II는 `fdp.isolation_mode=2`로 띄워야 해요.**
+  - 원본 FEMU는 `fdp.isolation_mode=1`이어도 마지막 RUH 하나만 II이고 나머지는 전부 PI예요 (`hw/femu/femu.c`, RUH 종류를 정하는 부분). FDP 설정 로그(20h, `nvme fdp configs`가 읽는 로그)로 확인했어요: 모드 0은 RUH 0–3 모두 PI, 모드 1은 RUH 0–2 PI·RUH 3만 II.
+  - 그래서 이 브랜치에 `fdp.isolation_mode=2`(모든 RUH II)를 넣었어요. GC가 모든 RUH의 유효 데이터를 마지막 RUH의 RU로 옮겨서, 서로 다른 RUH의 데이터가 섞여요. FTL은 원래 여러 II RUH를 이렇게 처리하게 짜여 있었고, RUH 종류를 정하는 부분과 RU 예약 계산만 바꿨어요.
+  - qtest `fdp-all-ii`로 확인했어요: 모든 RUH가 II로 보이고, GC가 여러 번 돈 뒤에도 데이터가 다 맞게 읽히고, 매핑과 RU 목록이 정상이고, host가 안 쓴 마지막 RUH에 GC 데이터가 모여요.
+  - 파일럿은 II로만 돌려요. `FEMU_START_CMD`에 `fdp.isolation_mode=2`를 넣고, RUH는 8개(PID 0–4만 씀, 마지막 RUH 7이 GC 데이터 몫)로 띄워요. PI 비교는 갈래 A에서 해요.
+  - `02_femu_run.sh`가 run마다 `nvme fdp configs`로 RUH 종류를 읽어 run 폴더의 `ruh_types`에 남기고, PID 0–4가 `EXPECT_RUHT`(II)가 아니면 멈춰요.
 - **workload:** 먼저 균등 랜덤으로 돌려요. 이득이 무너지는 게 재현되지 않으면 zipfian(일부 키에 쓰기가 쏠림, Lan의 YCSB-A와 비슷)을 다음에 시도해요. 7.2.2 db_bench의 overwrite에는 키 분포 옵션이 없어서, 그때는 YCSB나 다른 벤치마크를 붙여야 해요.
 - **공간 부족:** 93%는 공간 증폭이 크면 장치가 넘쳐요. 인구의 PC 보정값(`SPACE_AMP`)을 꼭 넣고, `pilot.py calc`에 경고가 없는지 확인하세요.
-- **시험한 것:** `03_host_loop.sh`는 가짜 FEMU·ssh로 시험했어요. 4 run 반복, `REP=2` 평균, 끝난 run 건너뛰기, 실패 시 멈춤, 접속이 잠깐 끊겼을 때 다시 확인하기, 판정 4가지(무너짐 / 안 무너짐 / 경계 / 보류)를 확인했어요. 진짜 FEMU와 진짜 db_bench로는 아직 안 돌려 봤어요.
+- **시험한 것:**
+  - `03_host_loop.sh`는 가짜 FEMU·ssh로 시험했어요. 4 run 반복, `REP=2` 평균, 끝난 run 건너뛰기, 실패 시 멈춤, 접속이 잠깐 끊겼을 때 다시 확인하기, 판정 4가지(무너짐 / 안 무너짐 / 경계 / 보류)를 확인했어요.
+  - 가짜 ssh 시험에서는 원격 실행 줄이 run 끝까지 안 돌아오는 문제가 안 보였어요. 출력 연결을 끝까지 기다리는 방식으로 다시 시험해서 `{ nohup … & }`로 고쳤어요.
+  - 진짜 FEMU와 진짜 db_bench로는 아직 안 돌려 봤어요.
 - **빌드:** 이 작업 공간에서는 빌드를 직접 돌려 보지 못했어요. 대신 Lan 패치와 TorFS 패치가 해당 버전에 깨끗하게 적용되는 것과, db_bench 7.2.2에 스크립트가 쓰는 옵션이 모두 있는 것은 확인했어요. GCC 13 이상에서 옛 RocksDB가 깨지는 경우가 있어 `-include cstdint`를 미리 넣어 두었어요.
 - **이 결과의 한계:** run 1번, 균등 랜덤 workload라 숫자를 논문에 쓰면 안 돼요. "무너짐이 FEMU에서도 보이는가"만 판단해요.
 
@@ -84,7 +107,7 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 └── pc_calib_u0.70/      du.csv, levelstats.txt, summary.txt, time.txt
 
 지윤 호스트: $HOST_RESULTS/   (게스트 $WORK/results/ 에서 run마다 복사해 옴)
-├── single_u0.70/        counters.csv, ruh.csv, meta.txt, db_bench_*.log, done
+├── single_u0.70/        counters.csv, usage.csv(실제 사용률), ruh_usage.csv(RUH별 쓰기·유효 데이터), lba_bytes, ruh_types, meta.txt, db_bench_*.log, done
 ├── lan_u0.70/
 ├── single_u0.93/
 ├── lan_u0.93/

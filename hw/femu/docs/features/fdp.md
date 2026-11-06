@@ -81,8 +81,10 @@ Properties: [Flexible Data Placement](../reference/properties.md#flexible-data-p
   size of one superblock of a group: `nchs * luns_per_ch * pls_per_lun *
   pgs_per_blk * secs_per_pg * secsz / fdp.nrg` (64 MiB with the default
   geometry and one group).
-- `fdp.isolation_mode`: 0 makes every handle Persistently Isolated; any other
-  value makes the last handle Initially Isolated.
+- `fdp.isolation_mode`: 0 makes every handle Persistently Isolated; 2 makes
+  every handle Initially Isolated, so collection moves the valid pages of all
+  of them into the last handle's unit, where data of different handles mix;
+  any other value makes the last handle Initially Isolated.
 
 ### Controller
 

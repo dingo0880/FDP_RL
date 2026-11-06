@@ -339,7 +339,7 @@ QEMU's internal compatibility properties (`x-max-bounce-buffer-size`, `x-pcie-ar
 | `fdp.nrg` | `uint32` | `1` | Number of FDP reclaim groups, from 1 to 128; with bbssd a group is a set of dies (whole channels, or LUNs of one channel), nrg must divide nchs or be a multiple of it that divides nchs * luns_per_ch, a logical block must be whole NAND pages, and each group must hold the whole namespace |
 | `fdp.nruh` | `uint16` | `0` | Number of FDP reclaim unit handles (placement handles), from 1 to fdp.nru and at most 16366; must be set when fdp=on |
 | `fdp.nru` | `uint64` | `128` | Number of reclaim units in each reclaim group, from fdp.nruh to 65536; bbssd uses at most one per superblock and needs at least 2 * fdp.nruh + 1 of them, and the namespace must fit in the units left once each handle has one open, each Persistently Isolated handle one to collect into, and forced collection its free ones |
-| `fdp.isolation_mode` | `uint32` | `0` | 0 makes every reclaim unit handle Persistently Isolated; any other value makes the last handle Initially Isolated |
+| `fdp.isolation_mode` | `uint32` | `0` | 0 makes every reclaim unit handle Persistently Isolated; 2 makes every handle Initially Isolated, collection moving the data of all of them into the last handle's unit; any other value makes the last handle Initially Isolated |
 
 ## `femu-cxl-ssd`: CXL Type-3 SSD
 

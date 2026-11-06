@@ -68,7 +68,7 @@ with a single FDP configuration when the subsystem is realized:
 | Reclaim groups (NRG) | 1 to 128 | `fdp.nrg` |
 | Reclaim units per group | as set, at most 65536 | `fdp.nru` |
 | Reclaim unit handles (NRUH) | 1 to `fdp.nru`, at most 16366 (the descriptor size of log 20h is 16 bits); must be set | `fdp.nruh` |
-| Handle type (RUHT) | Persistently Isolated; with `fdp.isolation_mode` non-zero the last handle is Initially Isolated | `fdp.isolation_mode` |
+| Handle type (RUHT) | Persistently Isolated; with `fdp.isolation_mode=2` every handle is Initially Isolated; with any other non-zero value the last handle is Initially Isolated | `fdp.isolation_mode` |
 | Reclaim unit size (RUNS) | one BlackBox superblock of the dies of a group (see below); the subsystem default of 96 MiB applies only when no bbssd controller overwrites it | `fdp.runs` |
 | Reclaim group identifier format (RGIF) | the bits that hold `nrg - 1`: 0 with one group, 1 with two; the placement handle keeps the rest, at least enough for `MIN(nruh, 128)` handles | derived |
 | MAXPIDS | `MIN(128, NRG x NRUH)`, reported zero-based, so below NRG x NRUH (Base 2.3, Figure 287) | derived |
@@ -454,8 +454,12 @@ The handle type decides the destination of the valid pages, which is what
 ```
 
 With the default `fdp.isolation_mode=0` every handle is Persistently
-Isolated. With it set, only the last handle is Initially Isolated, so its
-relocated data goes back into its own current unit.
+Isolated. With `fdp.isolation_mode=2` every handle is Initially Isolated:
+collection moves the valid pages of every handle's victims into the current
+unit of the last handle, where the data of different handles mix, as an
+Initially Isolated device may mix them. With any other non-zero value only
+the last handle is Initially Isolated, so its relocated data goes back into
+its own current unit and the other handles stay apart.
 
 A pass copies every valid page of the victim, invalidating each old copy as
 it goes, and only then erases the planes of each LUN as one multi-plane
@@ -721,7 +725,7 @@ of the property reference; the controller-side ones are under
 | `fdp.nru` | `femu-subsys` | Units per group; the FTL uses at most one per line. |
 | `fdp.nrg` | `femu-subsys` | Groups; with bbssd a set of dies each, see [Reclaim groups](#reclaim-groups). |
 | `fdp.runs` | `femu-subsys` | Unset, or the superblock size of a group. |
-| `fdp.isolation_mode` | `femu-subsys` | Non-zero makes the last handle Initially Isolated. |
+| `fdp.isolation_mode` | `femu-subsys` | 2 makes every handle Initially Isolated; any other non-zero value the last handle. |
 | `gc_strategy` | `femu` | Victim policy, above. No effect without FDP. |
 | `fdp_trim_erase_all` | `femu` | Whole-device reset on deallocate. No effect without FDP. |
 | `gc_thres_pcent`, `gc_thres_pcent_high` | `femu` | Background and foreground watermarks, as fractions of the units. |

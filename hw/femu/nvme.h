@@ -329,6 +329,28 @@ typedef struct NvmeSubsystem {
     } params;
 } NvmeSubsystem;
 
+/*
+ * fdp.isolation_mode: 0 makes every handle Persistently Isolated, this value
+ * every handle Initially Isolated, and any other the last handle Initially
+ * Isolated and the rest Persistently Isolated.
+ */
+#define FEMU_FDP_ISOLATION_ALL_II 2
+
+/* the number of Persistently Isolated handles fdp.isolation_mode gives */
+static inline uint64_t femu_fdp_pi_handles(const NvmeSubsystem *subsys)
+{
+    uint64_t nruh = subsys->params.fdp.nruh;
+
+    switch (subsys->params.fdp.isolation_mode) {
+    case 0:
+        return nruh;
+    case FEMU_FDP_ISOLATION_ALL_II:
+        return 0;
+    default:
+        return nruh ? nruh - 1 : 0;
+    }
+}
+
 typedef struct QEMU_PACKED NvmeRuhStatus {
     uint8_t  rsvd0[14];
     uint16_t nruhsd;
@@ -1246,6 +1268,7 @@ enum NvmeLogIdentifier {
     NVME_LOG_CP_PROGRAM_TYPES   = 0x83,
     NVME_LOG_CP_MRS_LIST        = 0x84,
     NVME_LOG_FEMU_STATS         = 0xc0,
+    NVME_LOG_FEMU_FDP_USAGE     = 0xc1,
 };
 
 /* LID Supported and Effects data structure, one per log page identifier */
@@ -1305,6 +1328,33 @@ typedef struct FemuStatsLog {
     uint64_t    map_read_pages;   /* translation pages read (dftl) */
     uint8_t     rsvd296[216];
 } FemuStatsLog;
+
+/*
+ * FEMU FDP usage (vendor log page C1h): what the FDP Statistics (22h) and
+ * Reclaim Unit Handle Usage (21h) pages do not carry. The header says how
+ * full the media is, as the valid pages on it against the capacity the FDP
+ * namespaces show. One descriptor per reclaim unit handle follows, in handle
+ * order: the bytes the host wrote through the handle and the media bytes
+ * charged to it (its host writes and the collection of its units, the
+ * counters 22h sums), and the valid pages in the units the handle owns now.
+ * An initially isolated handle's collected data sits in units of the last
+ * handle, so its live pages are counted there.
+ */
+typedef struct QEMU_PACKED FemuFdpUsageLog {
+    uint16_t    version;            /* 1 */
+    uint16_t    nruh;               /* descriptors that follow */
+    uint32_t    page_bytes;         /* flash page size */
+    uint64_t    valid_pages;        /* valid pages on the media */
+    uint64_t    capacity_bytes;     /* logical capacity of the FDP namespaces */
+    uint8_t     rsvd24[40];
+} FemuFdpUsageLog;
+
+typedef struct QEMU_PACKED FemuFdpUsageDescr {
+    uint64_t    hbmw;               /* host bytes written through the handle */
+    uint64_t    mbmw;               /* media bytes charged to the handle */
+    uint64_t    live_pages;         /* valid pages in units the handle owns */
+    uint8_t     rsvd24[8];
+} FemuFdpUsageDescr;
 
 /*
  * The header of the Telemetry Host-Initiated and Controller-Initiated log
@@ -1681,6 +1731,8 @@ static inline void nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeFwSlotInfoLog) != 512);
     QEMU_BUILD_BUG_ON(sizeof(NvmeSmartLog) != 512);
     QEMU_BUILD_BUG_ON(sizeof(FemuStatsLog) != 512);
+    QEMU_BUILD_BUG_ON(sizeof(FemuFdpUsageLog) != 64);
+    QEMU_BUILD_BUG_ON(sizeof(FemuFdpUsageDescr) != 32);
     QEMU_BUILD_BUG_ON(sizeof(NvmeTelemetryLog) != 512);
     QEMU_BUILD_BUG_ON(sizeof(NvmeIdCtrl) != 4096);
     QEMU_BUILD_BUG_ON(sizeof(NvmeIdNs) != 4096);

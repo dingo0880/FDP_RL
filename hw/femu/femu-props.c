@@ -58,8 +58,10 @@ static const FemuPropDesc femu_subsys_descs[] = {
       "left once each handle has one open, each Persistently Isolated "
       "handle one to collect into, and forced collection its free ones" },
     { "fdp.isolation_mode",
-      "0 makes every reclaim unit handle Persistently Isolated; any other "
-      "value makes the last handle Initially Isolated" },
+      "0 makes every reclaim unit handle Persistently Isolated; 2 makes "
+      "every handle Initially Isolated, collection moving the data of all "
+      "of them into the last handle's unit; any other value makes the last "
+      "handle Initially Isolated" },
     { NULL, NULL }
 };
 

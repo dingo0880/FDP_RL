@@ -155,12 +155,16 @@ static bool nvme_subsys_setup_fdp(NvmeSubsystem *subsys, Error **errp)
     for (ruhid = 0; ruhid < endgrp->fdp.nruh; ruhid++) {
         /*
          * isolation_mode=0 (default): all RUHs are Persistently Isolated (PI).
-         * isolation_mode=1: last RUH is Initially Isolated (II), rest are PI.
+         * isolation_mode=2 (FEMU_FDP_ISOLATION_ALL_II): all RUHs are Initially
+         * Isolated (II), and collection moves the valid pages of every one
+         * of them into the last RUH's unit, where they mix.
+         * Any other value: last RUH is II, rest are PI.
          * This matches the fdp.isolation_mode QOM property.
          */
         uint8_t ruht = NVME_RUHT_PERSISTENTLY_ISOLATED;
-        if (subsys->params.fdp.isolation_mode &&
-            ruhid == endgrp->fdp.nruh - 1) {
+        if (subsys->params.fdp.isolation_mode == FEMU_FDP_ISOLATION_ALL_II ||
+            (subsys->params.fdp.isolation_mode &&
+             ruhid == endgrp->fdp.nruh - 1)) {
             ruht = NVME_RUHT_INITIALLY_ISOLATED;
         }
         endgrp->fdp.ruhs[ruhid] = (NvmeRuHandle) {

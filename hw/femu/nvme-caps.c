@@ -367,6 +367,7 @@ uint32_t nvme_log_support(FemuCtrl *n, uint8_t csi, uint8_t lid)
     case NVME_LOG_FDP_RUH_USAGE:
     case NVME_LOG_FDP_STATS:
     case NVME_LOG_FDP_EVENTS:
+    case NVME_LOG_FEMU_FDP_USAGE:
         /*
          * FDP is fixed at realize: with it off there is no FDP capability
          * (CTRATT.FDPS clear), so the placement pages are neither listed

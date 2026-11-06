@@ -42,6 +42,13 @@ if [[ "${FORCE:-0}" != "1" ]]; then
 fi
 
 FPID=""
+# FEMU를 sudo로 띄우면 qemu는 root 프로세스라, 일반 사용자의 kill은 그룹 안의
+# 내 프로세스에만 닿고 qemu에는 안 닿아요(그래도 kill은 성공으로 끝나요).
+# 그래서 두 가지를 다 보내요. 호스트에서 sudo -n 이 되어야 root 쪽에 닿아요.
+signal_femu() {   # $1 = 신호 이름 (TERM, KILL)
+  kill "-$1" -- "-$FPID" 2>/dev/null || kill "-$1" "$FPID" 2>/dev/null || true
+  sudo -n kill "-$1" -- "-$FPID" 2>/dev/null || true
+}
 stop_femu() {
   [[ -n "$FPID" ]] || return 0
   gssh "sudo -n poweroff" >/dev/null 2>&1 || true
@@ -49,13 +56,19 @@ stop_femu() {
   while kill -0 "$FPID" 2>/dev/null && (( t < SHUTDOWN_TIMEOUT_SEC )); do sleep 5; t=$((t+5)); done
   if kill -0 "$FPID" 2>/dev/null; then
     echo "[host] FEMU가 안 꺼져서 강제 종료해요."
-    kill -TERM -- "-$FPID" 2>/dev/null || kill -TERM "$FPID" 2>/dev/null || true
-    sleep 10; kill -KILL -- "-$FPID" 2>/dev/null || true
+    signal_femu TERM; sleep 10; signal_femu KILL
+    t=0
+    while kill -0 "$FPID" 2>/dev/null && (( t < 30 )); do sleep 2; t=$((t+2)); done
+    if kill -0 "$FPID" 2>/dev/null; then
+      # wait 로 기다리면 여기서 영원히 멈춰요. 알리고 넘어가요.
+      echo "[host] FEMU(pid $FPID)를 못 껐어요. 손으로 꺼 주세요: sudo kill -KILL -- -$FPID"
+      FPID=""; return 1
+    fi
   fi
   wait "$FPID" 2>/dev/null || true
   FPID=""
 }
-trap 'echo "[host] 중단됨. FEMU를 꺼요."; stop_femu' INT TERM
+trap 'echo "[host] 중단됨. FEMU를 꺼요."; stop_femu; exit 130' INT TERM
 
 for POL in $POLICIES; do
   for U in $UTILS; do
@@ -84,10 +97,13 @@ for POL in $POLICIES; do
 
     # 3) run 하나를 게스트에서 백그라운드로 실행 (ssh가 끊겨도 계속 돌게 nohup)
     #    이전에 덜 끝난 같은 폴더가 있으면 지우고 새로 시작
+    #    { … & } 로 nohup 만 백그라운드로 보내야 ssh가 바로 돌아와요. 감싸지 않으면
+    #    "A && B && nohup … &" 전체가 백그라운드 서브셸이 되고, 그 서브셸이 ssh 출력을
+    #    run이 끝날 때까지 쥐고 있어서 ssh가 안 돌아와요.
     gssh "$GUEST_ENV && rm -rf \"\$RESULTS/$TAG\" && \
-          nohup sudo -n -E env WORK=\"\$WORK\" RESULTS=\"\$RESULTS\" FORCE=1 FRESH_FEMU=1 NO_SUMMARY=1 REP=$REP \
-          ./02_femu_run.sh '$POL' '$U' > \"\$HOME/fdp_run_$TAG.log\" 2>&1 < /dev/null & \
-          echo \$! > \"\$HOME/fdp_run_$TAG.pid\"; echo started"
+          { nohup sudo -n -E env WORK=\"\$WORK\" RESULTS=\"\$RESULTS\" FORCE=1 FRESH_FEMU=1 NO_SUMMARY=1 REP=$REP \
+              ./02_femu_run.sh '$POL' '$U' > \"\$HOME/fdp_run_$TAG.log\" 2>&1 < /dev/null & \
+            echo \$! > \"\$HOME/fdp_run_$TAG.pid\"; } && echo started"
 
     # 4) 끝날 때까지 기다리기 (PID 파일의 프로세스가 살아 있는 동안)
     #    ps -p 를 써요: sudo로 뜬 root 프로세스는 kill -0 이 권한 오류로 실패해서 "끝남"으로 잘못 보일 수 있어요.

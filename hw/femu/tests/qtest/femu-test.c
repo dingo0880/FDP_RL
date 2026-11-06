@@ -14160,6 +14160,230 @@ static void femu_query_ru_window(QTestState *qts, uint32_t offset,
     qobject_unref(rsp);
 }
 
+#define FEMU_LOG_FEMU_FDP_USAGE 0xc1
+
+/* read the FEMU FDP usage log (C1h) of four handles into @page */
+static void femu_fdp_usage(FemuCtrlState *c, uint64_t log, uint8_t *page)
+{
+    g_assert_cmphex(FEMU_SC(femu_get_log(c, FEMU_LOG_FEMU_FDP_USAGE, log,
+                                         64 + 4 * 32, 0)), ==, NVME_SUCCESS);
+    qtest_memread(c->pdev->bus->qts, log, page, 64 + 4 * 32);
+    g_assert_cmpuint(lduw_le_p(page), ==, 1);
+    g_assert_cmpuint(lduw_le_p(page + 2), ==, 4);
+    g_assert_cmpuint(ldl_le_p(page + 4), ==, 4096);
+}
+
+/*
+ * The FEMU FDP usage log on four persistently isolated handles: the header
+ * counts the valid pages and the namespace capacity, and each handle's
+ * descriptor has the host and media bytes query-femu gives it and the valid
+ * pages of its units. A rewrite adds host bytes but no valid page, after
+ * collection the counters still sum to the FDP Statistics log and the valid
+ * pages to the FTL's mappings, and a read past the last descriptor is
+ * refused.
+ */
+static void femu_test_fdp_usage_log(void *obj, void *data,
+                                    QGuestAllocator *alloc)
+{
+    QFemu *femu = obj;
+    QTestState *qts = femu->dev.bus->qts;
+    FemuCtrlState c = { 0 };
+    const uint32_t pages = 256;
+    uint64_t buf = guest_alloc(alloc, 4096);
+    uint64_t list = guest_alloc(alloc, 4096);
+    uint64_t log = guest_alloc(alloc, 4096);
+    uint64_t qlog = guest_alloc(alloc, 4096);
+    uint64_t host[4] = { 0 };
+    uint64_t sum_host = 0, sum_media = 0, sum_live = 0;
+    uint8_t page[64 + 4 * 32];
+    uint8_t one[32];
+    uint32_t seed = 11;
+    int i;
+
+    femu_enable(&c, &femu->dev, alloc);
+    femu_create_io_queues(&c);
+    qtest_memset(qts, buf, 0x5a, 4096);
+
+    /* empty: no valid page, nothing written, the 1 MiB namespace */
+    femu_fdp_usage(&c, log, page);
+    g_assert_cmpuint(ldq_le_p(page + 8), ==, 0);
+    g_assert_cmpuint(ldq_le_p(page + 16), ==, 1 << 20);
+    for (i = 0; i < 4; i++) {
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i), ==, 0);
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i + 8), ==, 0);
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i + 16), ==, 0);
+    }
+
+    /* 64 pages through placement 1, 32 through placement 2 */
+    g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, 0, 64, buf, list, 1)),
+                    ==, NVME_SUCCESS);
+    g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, 64, 32, buf, list, 2)),
+                    ==, NVME_SUCCESS);
+    femu_query_check_fdp(&c, qlog, 96, host);
+    femu_fdp_usage(&c, log, page);
+    g_assert_cmpuint(ldq_le_p(page + 8), ==, 96);
+    for (i = 0; i < 4; i++) {
+        uint64_t want = i == 1 ? 64 : i == 2 ? 32 : 0;
+
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i), ==, host[i]);
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i), ==, want * 4096);
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i + 8), ==, want * 4096);
+        g_assert_cmpuint(ldq_le_p(page + 64 + 32 * i + 16), ==, want);
+    }
+
+    /* a rewrite of 32 pages of placement 1: more host bytes, same valid */
+    g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, 0, 32, buf, list, 1)),
+                    ==, NVME_SUCCESS);
+    femu_fdp_usage(&c, log, page);
+    g_assert_cmpuint(ldq_le_p(page + 8), ==, 96);
+    g_assert_cmpuint(ldq_le_p(page + 64 + 32), ==, 96 * 4096);
+    g_assert_cmpuint(ldq_le_p(page + 64 + 32 + 16), ==, 64);
+
+    /* fill every page, then rewrite until collection has run */
+    for (i = 0; i < pages; i += 64) {
+        g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, i, 64, buf, list,
+                                                        (i / 64) % 4)),
+                        ==, NVME_SUCCESS);
+    }
+    for (i = 0; i < 1200; i++) {
+        uint32_t npages = i % 4 == 3 ? 64 : 1;
+        uint64_t pg;
+
+        seed = seed * 1103515245 + 12345;
+        pg = (seed >> 8) % (pages - npages + 1);
+        g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, pg, npages, buf,
+                                                        list, (seed >> 4) % 4)),
+                        ==, NVME_SUCCESS);
+    }
+    femu_query_check_fdp(&c, qlog, pages, host);
+    femu_fdp_usage(&c, log, page);
+    g_assert_cmpuint(ldq_le_p(page + 8), ==, pages);
+    for (i = 0; i < 4; i++) {
+        uint64_t hb = ldq_le_p(page + 64 + 32 * i);
+        uint64_t mb = ldq_le_p(page + 64 + 32 * i + 8);
+
+        g_assert_cmpuint(hb, ==, host[i]);
+        g_assert_cmpuint(hb, <=, mb);
+        sum_host += hb;
+        sum_media += mb;
+        sum_live += ldq_le_p(page + 64 + 32 * i + 16);
+    }
+    g_assert_cmpuint(sum_live, ==, pages);
+    g_assert_cmpint(femu_endgrp_log(&c, FEMU_LOG_FDP_STATS, 0, qlog, 64), ==,
+                    NVME_SUCCESS);
+    g_assert_cmpuint(sum_host, ==, qtest_readq(qts, qlog));
+    g_assert_cmpuint(sum_media, ==, qtest_readq(qts, qlog + 16));
+    /* collection ran, so some handle was charged more than it wrote */
+    g_assert_cmpuint(sum_media, >, sum_host);
+
+    /* an offset lands on a descriptor; past the last one is refused */
+    g_assert_cmphex(FEMU_SC(femu_get_log(&c, FEMU_LOG_FEMU_FDP_USAGE, log,
+                                         32, 64 + 32)), ==, NVME_SUCCESS);
+    qtest_memread(qts, log, one, 32);
+    g_assert_cmpmem(one, 32, page + 64 + 32, 32);
+    g_assert_cmphex(FEMU_SC(femu_get_log(&c, FEMU_LOG_FEMU_FDP_USAGE, log,
+                                         4, 64 + 4 * 32)), ==,
+                    NVME_INVALID_FIELD);
+
+    guest_free(alloc, qlog);
+    guest_free(alloc, log);
+    guest_free(alloc, list);
+    guest_free(alloc, buf);
+    femu_queue_free(&c, &c.io);
+    femu_disable(&c);
+}
+
+/*
+ * fdp.isolation_mode=2: the FDP Configurations log reports every handle
+ * Initially Isolated, and collection moves the valid pages of the handles
+ * the host writes through (0 to 2) into units of the last one, which the
+ * host never writes. Pages written one at a time with their number and
+ * version read back as last written once collection has run many times, the
+ * FTL holds every mapping, and every unit sits in one place.
+ */
+static void femu_test_fdp_all_ii(void *obj, void *data, QGuestAllocator *alloc)
+{
+    QFemu *femu = obj;
+    QTestState *qts = femu->dev.bus->qts;
+    FemuCtrlState c = { 0 };
+    const uint32_t pages = 256;
+    uint64_t buf = guest_alloc(alloc, 4096);
+    uint64_t list = guest_alloc(alloc, 4096);
+    uint64_t log = guest_alloc(alloc, 4096);
+    uint64_t qlog = guest_alloc(alloc, 4096);
+    uint64_t host[4] = { 0 };
+    uint64_t mapped, lost, orphans;
+    uint64_t sum_host = 0, sum_media = 0, sum_live = 0;
+    uint8_t conf[16 + 64 + 4 * 4];
+    uint8_t page[64 + 4 * 32];
+    uint32_t ver[256] = { 0 };
+    uint32_t seed = 5;
+    uint32_t i;
+
+    femu_enable(&c, &femu->dev, alloc);
+    femu_create_io_queues(&c);
+
+    g_assert_cmphex(FEMU_SC(femu_endgrp_log(&c, 0x20, 0, log, sizeof(conf))),
+                    ==, NVME_SUCCESS);
+    qtest_memread(qts, log, conf, sizeof(conf));
+    g_assert_cmpuint(lduw_le_p(conf + 16 + 8), ==, 4);
+    for (i = 0; i < 4; i++) {
+        g_assert_cmpuint(conf[16 + 64 + 4 * i], ==, 1);   /* RUHT 01h: II */
+    }
+
+    /* every page once, then rewrites until collection has run many times */
+    for (i = 0; i < pages + 2000; i++) {
+        uint32_t pg = i;
+
+        if (i >= pages) {
+            seed = seed * 1103515245 + 12345;
+            pg = (seed >> 8) % pages;
+            ver[pg]++;
+        }
+        qtest_writeq(qts, buf, pg);
+        qtest_writeq(qts, buf + 8, ver[pg]);
+        g_assert_cmphex(FEMU_SC(femu_write_pages_placed(&c, pg, 1, buf, list,
+                                                        (seed >> 4) % 3)),
+                        ==, NVME_SUCCESS);
+    }
+    for (i = 0; i < pages; i++) {
+        qtest_writeq(qts, buf, ~0ULL);
+        g_assert_cmphex(FEMU_SC(femu_read_pages(&c, i, 1, buf, list)), ==,
+                        NVME_SUCCESS);
+        g_assert_cmpuint(qtest_readq(qts, buf), ==, i);
+        g_assert_cmpuint(qtest_readq(qts, buf + 8), ==, ver[i]);
+    }
+
+    femu_ftl_check(qts, &mapped, &lost, &orphans);
+    g_assert_cmpuint(mapped, ==, pages);
+    g_assert_cmpuint(lost, ==, 0);
+    g_assert_cmpuint(orphans, ==, 0);
+    g_assert_cmpuint(femu_fdp_check(qts), ==, 0);
+    femu_query_check_fdp(&c, qlog, pages, host);
+    g_assert_cmpuint(host[3], ==, 0);
+
+    femu_fdp_usage(&c, log, page);
+    g_assert_cmpuint(ldq_le_p(page + 8), ==, pages);
+    for (i = 0; i < 4; i++) {
+        sum_host += ldq_le_p(page + 64 + 32 * i);
+        sum_media += ldq_le_p(page + 64 + 32 * i + 8);
+        sum_live += ldq_le_p(page + 64 + 32 * i + 16);
+    }
+    g_assert_cmpuint(sum_host, ==, (uint64_t)(pages + 2000) * 4096);
+    g_assert_cmpuint(sum_media, >, sum_host);
+    g_assert_cmpuint(sum_live, ==, pages);
+    /* the host never wrote through handle 3, collection did */
+    g_assert_cmpuint(ldq_le_p(page + 64 + 32 * 3), ==, 0);
+    g_assert_cmpuint(ldq_le_p(page + 64 + 32 * 3 + 16), >, 0);
+
+    guest_free(alloc, qlog);
+    guest_free(alloc, log);
+    guest_free(alloc, list);
+    guest_free(alloc, buf);
+    femu_queue_free(&c, &c.io);
+    femu_disable(&c);
+}
+
 /*
  * query-femu on an FDP namespace with four handles: writes through two
  * handles show up on those handles only, the counters agree with the FDP
@@ -43139,6 +43363,8 @@ static void femu_register_nodes(void)
             "-device femu-subsys,id=fdpsub,nqn=fdpsub,fdp=on,fdp.nruh=4 "
             "-device femu-subsys,id=fdpsub-ii,nqn=fdpsub-ii,fdp=on,fdp.nruh=4,"
             "fdp.isolation_mode=1 "
+            "-device femu-subsys,id=fdpsub-allii,nqn=fdpsub-allii,fdp=on,"
+            "fdp.nruh=4,fdp.isolation_mode=2 "
             "-device femu-subsys,id=fdpsub-runs,nqn=fdpsub-runs,fdp=on,"
             "fdp.nruh=4,fdp.runs=64K "
             "-device femu-subsys,id=fdpsub-tiny,nqn=fdpsub-tiny,fdp=on,"
@@ -45842,6 +46068,20 @@ static void femu_register_nodes(void)
             "subsys=fdpsub",
     });
     qos_add_test("query-fdp", "femu", femu_test_query_fdp,
+                 &(QOSGraphTestOptions) {
+        .edge.extra_device_opts =
+            "id=gc-test,devsz_mb=1,femu_mode=1,secsz=512,secs_per_pg=8,"
+            "pgs_per_blk=4,blks_per_pl=25,pls_per_lun=1,luns_per_ch=2,nchs=2,"
+            "subsys=fdpsub",
+    });
+    qos_add_test("fdp-all-ii", "femu", femu_test_fdp_all_ii,
+                 &(QOSGraphTestOptions) {
+        .edge.extra_device_opts =
+            "id=gc-test,devsz_mb=1,femu_mode=1,secsz=512,secs_per_pg=8,"
+            "pgs_per_blk=4,blks_per_pl=25,pls_per_lun=1,luns_per_ch=2,nchs=2,"
+            "subsys=fdpsub-allii",
+    });
+    qos_add_test("fdp-usage-log", "femu", femu_test_fdp_usage_log,
                  &(QOSGraphTestOptions) {
         .edge.extra_device_opts =
             "id=gc-test,devsz_mb=1,femu_mode=1,secsz=512,secs_per_pg=8,"

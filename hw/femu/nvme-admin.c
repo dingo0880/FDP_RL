@@ -2778,6 +2778,82 @@ static uint16_t nvme_fdp_stats(FemuCtrl *n, uint32_t endgrpid,
     return dma_read_prp(n, (uint8_t *)&log + off, trans_len, prp1, prp2);
 }
 
+/*
+ * FEMU FDP usage (vendor log C1h, FemuFdpUsageLog). The byte counters are
+ * the per-handle ones 22h sums. The valid pages are counted over the units of
+ * each FDP namespace's FTL when the host asks, once per FTL. The FTL thread
+ * keeps writing meanwhile, so a read is a snapshot a few pages off, which a
+ * host sampling every few seconds does not notice.
+ */
+static uint16_t nvme_femu_fdp_usage(FemuCtrl *n, uint32_t buf_len,
+                                    uint64_t off, NvmeCmd *cmd)
+{
+    NvmeEnduranceGroup *endgrp = &n->subsys->endgrp;
+    uint16_t nruh = endgrp->fdp.nruh;
+    uint32_t log_size = sizeof(FemuFdpUsageLog) +
+                        nruh * sizeof(FemuFdpUsageDescr);
+    uint64_t prp1 = le64_to_cpu(cmd->dptr.prp1);
+    uint64_t prp2 = le64_to_cpu(cmd->dptr.prp2);
+    g_autofree uint8_t *buf = NULL;
+    g_autofree uint64_t *live = NULL;
+    FemuFdpUsageLog *hdr;
+    FemuFdpUsageDescr *d;
+    uint64_t valid = 0, cap = 0;
+    uint32_t trans_len, page_bytes = 0;
+    int i;
+
+    if (off >= log_size) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+    trans_len = MIN(log_size - off, buf_len);
+
+    live = g_new0(uint64_t, nruh);
+    for (i = 0; n->namespaces && i < n->namespace_limit; i++) {
+        NvmeNamespace *ns = &n->namespaces[i];
+        struct ssd *ssd = ns->ssd;
+
+        if (!ns->allocated || !NS_BBSSD(ns) || !ssd || !ssd->fdp_enabled) {
+            continue;
+        }
+        cap += ns->size;
+        /* a namespace on another's FTL: that media is counted with it */
+        if (ns->ssd_shared) {
+            continue;
+        }
+        page_bytes = ssd->sp.secsz * ssd->sp.secs_per_pg;
+        for (uint64_t r = 0; r < ssd->nrg; r++) {
+            for (int u = 0; u < ssd->rg[r].tt_nru; u++) {
+                valid += MAX(ssd->rg[r].rus[u].vpc, 0);
+            }
+        }
+        for (uint64_t h = 0; h < ssd->nruhs; h++) {
+            if (ssd->ruhs[h].ruhid < nruh) {
+                live[ssd->ruhs[h].ruhid] +=
+                    MAX(ssd->ruhs[h].ruh_live_pages_cnt, 0);
+            }
+        }
+    }
+
+    buf = g_malloc0(log_size);
+    hdr = (FemuFdpUsageLog *)buf;
+    d = (FemuFdpUsageDescr *)(hdr + 1);
+    hdr->version = cpu_to_le16(1);
+    hdr->nruh = cpu_to_le16(nruh);
+    hdr->page_bytes = cpu_to_le32(page_bytes);
+    hdr->valid_pages = cpu_to_le64(valid);
+    hdr->capacity_bytes = cpu_to_le64(cap);
+
+    qemu_mutex_lock(&endgrp->fdp.stats_lock);
+    for (i = 0; i < nruh; i++) {
+        d[i].hbmw = cpu_to_le64(endgrp->fdp.ruhs[i].hbmw);
+        d[i].mbmw = cpu_to_le64(endgrp->fdp.ruhs[i].mbmw);
+        d[i].live_pages = cpu_to_le64(live[i]);
+    }
+    qemu_mutex_unlock(&endgrp->fdp.stats_lock);
+
+    return dma_read_prp(n, buf + off, trans_len, prp1, prp2);
+}
+
 static uint16_t nvme_fdp_events(FemuCtrl *n, uint32_t endgrpid,
                                 uint32_t buf_len, uint64_t off, NvmeCmd *cmd)
 {
@@ -3301,6 +3377,8 @@ static uint16_t nvme_get_log(FemuCtrl *n, NvmeCmd *cmd)
         return nvme_fdp_stats(n, lspi, len, off, cmd);
     case NVME_LOG_FDP_EVENTS:
         return nvme_fdp_events(n, lspi, len, off, cmd);
+    case NVME_LOG_FEMU_FDP_USAGE:
+        return nvme_femu_fdp_usage(n, len, off, cmd);
     case NVME_LOG_REACH_GROUPS:
     case NVME_LOG_REACH_ASSOCS:
         return nvme_reach_log(n, cmd, lid, (dw10 >> 8) & 0x1, len, off);
