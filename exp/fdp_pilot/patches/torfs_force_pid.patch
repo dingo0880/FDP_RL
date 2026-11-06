@@ -1,0 +1,49 @@
+diff --git a/fs/fs_torfs.cc b/fs/fs_torfs.cc
+index 94ccd23..c8bfa3f 100644
+--- a/fs/fs_torfs.cc
++++ b/fs/fs_torfs.cc
+@@ -15,6 +15,7 @@
+  * limitations under the License.
+ */
+ 
++#include <cstdlib>
+ #include "fs_torfs.h"
+ 
+ #include <sys/time.h>
+@@ -227,6 +228,11 @@ IOStatus TorFS::NewWritableFile(const std::string& fname,
+   if (fname.find("MANIFEST") != std::string::npos) {
+     pId = 4;
+   }
++  // [pilot] TORFS_FORCE_PID=<n> overrides the default PID as well.
++  const char* force_pid = getenv("TORFS_FORCE_PID");
++  if (force_pid != nullptr && force_pid[0] != '\0') {
++    pId = atoi(force_pid);
++  }
+ 
+   files_[new_fname] = new FDPFile(new_fname, 0, pId, io_interface_, logger_);
+   files_[new_fname]->uuididx_ = uuididx_++;
+diff --git a/fs/fs_torfs_io.cc b/fs/fs_torfs_io.cc
+index cddf149..2d00e26 100644
+--- a/fs/fs_torfs_io.cc
++++ b/fs/fs_torfs_io.cc
+@@ -15,6 +15,7 @@
+  * limitations under the License.
+ */
+ 
++#include <cstdlib>
+ #include <string.h>
+ #include <sys/time.h>
+ #include <unistd.h>
+@@ -488,6 +489,12 @@ void FDPWritableFile::SetWriteLifeTimeHint(Env::WriteLifeTimeHint hint) {
+   fdp_file_->level_ = hint - Env::WLTH_SHORT;
+   fdp_file_->pid_ =
+       fdp_file_->level_ >= MAX_PID ? (MAX_PID - 1) : fdp_file_->level_;
++  // [pilot] TORFS_FORCE_PID=<n> sends every file to one placement ID
++  // (used for the "Single PID" baseline).
++  const char* force_pid = getenv("TORFS_FORCE_PID");
++  if (force_pid != nullptr && force_pid[0] != '\0') {
++    fdp_file_->pid_ = atoi(force_pid);
++  }
+ }
+ 
+ IOStatus FDPWritableFile::RangeSync(uint64_t offset, uint64_t nbytes,
