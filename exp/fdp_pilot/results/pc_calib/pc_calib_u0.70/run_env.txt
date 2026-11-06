@@ -1,0 +1,1 @@
+OVERWRITE_MULT=1 SCALE=1 PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb NOFSYNC=1 LD_PRELOAD=/home/cps/fdp_pilot_work/overnight/libnofsync.so

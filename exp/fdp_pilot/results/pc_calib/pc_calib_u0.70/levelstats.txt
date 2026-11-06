@@ -1,0 +1,13 @@
+Level Files Size(MB)
+--------------------
+  0        0        0
+  1        9        4
+  2       98       40
+  3      965      400
+  4     8635     4000
+  5    34081    14790
+
+
+
+** Compaction Stats [default] **
+Level    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)

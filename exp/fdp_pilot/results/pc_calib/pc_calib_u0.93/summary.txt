@@ -1,0 +1,6 @@
+== PC 보정 결과: /home/cps/fdp_pilot_work/results/pc_calib_u0.93 ==
+  논리 데이터      : 19.03 GiB
+  최대 사용량      : 23.99 GiB
+  공간 증폭        : 1.261   <- config.env 의 SPACE_AMP 에 넣을 값 후보
+  host 쓰기(근사)  : 468.9 GiB (compaction+flush 449.6, WAL 19.2)
+  MANIFEST 비중    : 0.021% (최대 파일 크기 기준 근사)

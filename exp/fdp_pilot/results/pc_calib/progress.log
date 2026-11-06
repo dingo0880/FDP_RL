@@ -1,0 +1,7 @@
+[2026-11-04 19:47:22] 시작 (UTILS=0.70 0.93, OVERWRITE_MULT=1, PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb, ulimit -n=1048576, NOFSYNC=1)
+[2026-11-04 19:47:22] 건너뜀 (이미 끝남): /home/cps/fdp_pilot_work/results/pc_calib_u0.70_scale0.05
+[2026-11-04 19:47:22] 실행 중: 사용률 0.70, SCALE=1  (로그: /home/cps/fdp_pilot_work/overnight/run_u0.70_s1.log)
+[2026-11-05 01:00:01] 끝: /home/cps/fdp_pilot_work/results/pc_calib_u0.70 (312 분)
+[2026-11-05 01:00:01] 실행 중: 사용률 0.93, SCALE=1  (로그: /home/cps/fdp_pilot_work/overnight/run_u0.93_s1.log)
+[2026-11-05 10:00:37] 끝: /home/cps/fdp_pilot_work/results/pc_calib_u0.93 (540 분)
+[2026-11-05 10:00:37] 보고서 작성 중
