@@ -69,18 +69,48 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 | workload | YCSB-A (zipfian 0.99) | db_bench overwrite (균등 랜덤) | TorFS 연결이 db_bench가 가장 간단해서. 파일럿은 이득이 무너지는지만 보면 돼요 |
 | 백그라운드 작업 | 64 | 4 | 작은 장치·FEMU 속도에 맞춤 |
 
+## 장치(FEMU) 설정과 근거
+
+Lan 논문은 장치의 OP·물리 용량·RU 개수·격리 방식(II/PI)을 밝히지 않아요(RUH 8개, RU 약 13.08 GB만 나와요). 그래서 OP와 격리 방식은 **실제 FDP SSD에 맞춰 보정한 WARP(FAST'26)의 기본값**을 따르고, 나머지는 FEMU 제약 안에서 정했어요.
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 격리 방식 | II, 모든 RUH (`fdp.isolation_mode=2`) | WARP §2: 상용 FDP SSD는 처음 설계에서 II를 택했어요. 원본 FEMU는 마지막 RUH만 II가 돼서 이 브랜치에 모드 2를 넣었어요 (위 "II는 …" 참고) |
+| RUH 수 | **6개 권장** (PID 0–4 데이터 + RUH 5 GC 전용). 8개도 가능 | Lan 장치는 8개, 그중 5개 사용. FEMU는 **안 쓰는 RUH에도 RU를 하나씩 열어 둬요** (`ftl-fdp.c` 초기화). 8개면 RUH 5·6이 빈 RU 2개를 끝까지 묶어 둬서, 시험(아래)에서 media가 6개일 때보다 18% 많았어요. 이건 FEMU 구현 탓이고 실제 장치도 그런지는 알 수 없어서, OP 효과에 섞이지 않게 6개를 권해요. 쓰는 RUH 구성(데이터 5 + GC 1)은 Lan과 같아요 |
+| RU 크기 | 128 MiB = 채널 8 × LUN 8 × 블록당 512페이지 × 4 KiB | bbssd는 RU가 superblock 하나예요. WARP 공개 스크립트의 128 MiB RU 배치와 같아요 |
+| 사용자 용량 | 24 GiB (`devsz_mb=24576`, RU 192개) | Lan 장치(3.84 TB ÷ 13.08 GB ≈ 294개)와 RU 개수 규모가 비슷하고, 시간·메모리 안에 들어와요 |
+| OP | **10% → 전체 RU 211개 (실제 9.9%)**, `blks_per_pl=211`, `fdp.nru=211` | WARP §5 기본값 "RU=256MB, OP=10%, lazy GC 5%, RUH 8개"(실제 장치 WAF에 맞춰 보정). 계산식은 WARP 공개 스크립트와 같아요: `RU 개수 = 사용자 용량 × 1.1 ÷ RU 크기` = 24 × 1.1 × 1024 ÷ 128 = 211.2 → 211. FEMU의 `op_pcent`도 같은 정의(사용자 용량 × (1 + OP))예요. `op_pcent=10`을 쓰면 사용자 용량이 23.98 GiB가 돼서, RU 개수로 맞췄어요 |
+| GC | `gc_thres_pcent=75`, `gc_thres_pcent_high=95` (원본 기본값) | 지윤 결정. WARP의 보정에는 lazy GC 5%, 블록 재매핑, 백그라운드 약 90%·포그라운드 약 99%가 같이 들어가는데(WARP §4.3), 최신 원본 FEMU에는 lazy GC와 재매핑이 없어요. 그래서 OP 숫자는 WARP와 같아도 **WAF 절댓값은 WARP와 다를 수 있어요.** 파일럿은 같은 조건 안의 비교로만 봐요 |
+
+**FEMU가 받아 주는 하한.** 전체 RU에서 RUH마다 열린 RU 1개와 강제 GC용 빈 RU(전체의 5%, 버림)를 빼고도 사용자 RU 192개가 남아야 FEMU가 떠요 (`bb_fdp_reserve_units`, 시작할 때 검사).
+- RUH 8개: RU 210개(OP 9.4%)부터. 209개는 시작 오류예요.
+- RUH 6개: RU 208개(OP 8.3%)부터. 207개는 시작 오류예요.
+- 둘 다 FEMU를 직접 띄워서 확인했어요.
+- 그래서 **OP 7%는 이 설정으로 만들 수 없어요.** 하려면 GC 강제 기준(95%)을 바꿔야 해서 GC 동작이 같이 바뀌어요. 본 실험에서 OP를 바꿔 볼 때는 10 / 17 / 28%처럼 하한 위에서 잡아요(WARP는 OP 1~28%를 다뤘어요, §4.4).
+
+**RU 211개로 시험한 것 (qtest, RU 크기만 작게 줄이고 RU 개수는 같게).** 모두 II, PID 0–4로 namespace를 100% 채운 뒤 4배 덮어쓰기:
+- RUH 8개·6개 모두 쓰기 15,360번 중 실패 0. 모든 페이지가 마지막에 쓴 버전으로 읽혔고, 매핑 손실·RU 목록 오류 0. 빈 RU는 최소 11개(강제 GC 기준 10개)까지 내려갔어요. GC가 막히지 않아요.
+- RUH 8개는 RUH 5·6이 쓰기 0·유효 0인 RU를 하나씩 끝까지 붙잡고 있었어요.
+- 100%까지 채우고 RU가 아주 작은 극단 조건이라 숫자 자체는 파일럿 결과를 예측하지 않아요. 방향만 봐요.
+
+**FEMU를 띄울 메모리.** 원본 FEMU는 SSD 데이터를 전부 RAM에 올리고 `mlock`해요(`backend/dram.c`). RU 211개 × 128 MiB ≈ 26.4 GiB에 게스트 메모리가 더 필요해요. 그만큼 RAM이 없는 호스트면 데이터를 파일에 올리는 기능(master의 `FEMU_MBE_FILE`)을 이 브랜치로 가져와야 해요.
+
 ## 미리 알아 둘 것
 
 - **장치 카운터:** 기본값은 `nvme fdp stats`(FDP 통계 로그, 22h)에서 HBMW(host 쓰기)와 MBMW(media 쓰기)를 읽어요. 원본 FEMU에 있는 표준 로그예요. 다른 장치에서 이 로그가 없으면 `COUNTER_METHOD=custom`으로 바꾸고, `host_bytes media_bytes`를 한 줄로 출력하는 명령을 `COUNTER_CMD`에 넣으세요.
 - **RUH별 쓰기와 실제 사용률 (`RUH_METHOD=femu`, 기본):** 이 브랜치의 FEMU에 사용량 로그(vendor log C1h, `hw/femu/nvme.h`의 `FemuFdpUsageLog`)를 넣었어요. `nvme get-log --log-id=0xc1`로 읽어요.
-  - RUH마다 host 쓰기량(HBMW), media 쓰기량(MBMW, 그 RUH의 RU를 GC로 옮긴 양 포함), 그 RUH가 가진 RU의 유효 페이지를 정확히 줘요.
+  - RUH마다 host 쓰기량(HBMW), media 쓰기량(MBMW, 그 RUH가 가진 RU를 GC할 때 옮긴 양 포함), 그 RUH가 가진 RU의 유효 페이지를 정확히 줘요.
   - 장치 전체의 유효 페이지와 용량도 줘서, 실제 사용률을 바로 계산할 수 있어요.
   - 필요한 이유 두 가지:
     - 최신 원본 FEMU는 RUH Usage 로그(21h)를 표준대로 8바이트로 줄였어요(커밋 1bc8508a6). 그래서 RUH별 쓰기량을 볼 길이 없어요.
     - TorFS는 파일을 지울 때 DEALLOCATE를 백그라운드 스레드가 나중에 보내요. 그래서 장치가 PC 보정값보다 더 찰 수 있어 실제 사용률을 장치에서 직접 재요.
   - 이 로그는 FEMU qtest `fdp-usage-log`로 확인했어요: query-femu·FDP 통계 로그와 값이 같고, 유효 페이지가 FTL 매핑과 같아요.
   - single은 PID 0만, lan은 0–4가 다 나와야 정상이에요.
-  - II에서는 GC로 옮긴 데이터가 마지막 RUH의 RU에 모여요. 그래서 그 몫의 유효 페이지는 마지막 RUH에 잡히고, media 쓰기량은 GC당한 원래 RUH에 잡혀요.
+  - **II에서 RUH별 값을 읽는 법 (주의):** GC로 옮긴 데이터는 마지막 RUH(GC 전용)의 RU에 모여요.
+    - 유효 페이지: 옮겨진 몫은 마지막 RUH에 잡혀요.
+    - media 쓰기량: GC는 RU를 가진 RUH에 매겨져요. 그래서 데이터가 원래 RUH의 RU에서 **처음 옮겨질 때만** 원래 RUH에 잡히고, 마지막 RUH의 RU에 들어간 뒤 다시 GC되면 **마지막 RUH에** 잡혀요.
+    - 그래서 RUH별 media는 "데이터 종류(PID)별 GC 비용"이 아니에요. 시험(RU 211개, 모두 II, 100% 채운 뒤 4배 덮어쓰기)에서 host 쓰기가 0인 GC RUH가 media의 81%를 차지했고, 유효 데이터의 93%가 GC RUH에 모여 있었어요.
+    - 파일럿 판정(전체 WAF)에는 영향이 없어요. 갈래 A에서 데이터 종류별로 GC 비용을 나누려면, FEMU가 페이지마다 처음 쓴 RUH를 기억하게 고쳐야 해요.
 - **RUAMW 방식 (`RUH_METHOD=fdpstatus`):** 실제 FDP SSD처럼 이 로그가 없을 때 쓰는 근사예요. `nvme fdp status`의 RUAMW 변화로 추정해요.
   - RUAMW는 LBA 단위예요. LBA 크기는 run마다 `nvme id-ns`로 읽어 run 폴더의 `lba_bytes`에 남기고, summary가 그 값을 써요.
   - FEMU 기본은 512 B이고 실제 FDP SSD는 보통 4 KiB예요. 못 읽으면 `config.env`의 `LBA_BYTES`를 써요.
@@ -89,7 +119,7 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
   - 원본 FEMU는 `fdp.isolation_mode=1`이어도 마지막 RUH 하나만 II이고 나머지는 전부 PI예요 (`hw/femu/femu.c`, RUH 종류를 정하는 부분). FDP 설정 로그(20h, `nvme fdp configs`가 읽는 로그)로 확인했어요: 모드 0은 RUH 0–3 모두 PI, 모드 1은 RUH 0–2 PI·RUH 3만 II.
   - 그래서 이 브랜치에 `fdp.isolation_mode=2`(모든 RUH II)를 넣었어요. GC가 모든 RUH의 유효 데이터를 마지막 RUH의 RU로 옮겨서, 서로 다른 RUH의 데이터가 섞여요. FTL은 원래 여러 II RUH를 이렇게 처리하게 짜여 있었고, RUH 종류를 정하는 부분과 RU 예약 계산만 바꿨어요.
   - qtest `fdp-all-ii`로 확인했어요: 모든 RUH가 II로 보이고, GC가 여러 번 돈 뒤에도 데이터가 다 맞게 읽히고, 매핑과 RU 목록이 정상이고, host가 안 쓴 마지막 RUH에 GC 데이터가 모여요.
-  - 파일럿은 II로만 돌려요. `FEMU_START_CMD`에 `fdp.isolation_mode=2`를 넣고, RUH는 8개(PID 0–4만 씀, 마지막 RUH 7이 GC 데이터 몫)로 띄워요. PI 비교는 갈래 A에서 해요.
+  - 파일럿은 II로만 돌려요. `FEMU_START_CMD`에 `fdp.isolation_mode=2`를 넣어요. PI 비교는 갈래 A에서 해요. RUH 수와 OP는 아래 "장치(FEMU) 설정과 근거"를 보세요.
   - `02_femu_run.sh`가 run마다 `nvme fdp configs`로 RUH 종류를 읽어 run 폴더의 `ruh_types`에 남기고, PID 0–4가 `EXPECT_RUHT`(II)가 아니면 멈춰요.
 - **workload:** 먼저 균등 랜덤으로 돌려요. 이득이 무너지는 게 재현되지 않으면 zipfian(일부 키에 쓰기가 쏠림, Lan의 YCSB-A와 비슷)을 다음에 시도해요. 7.2.2 db_bench의 overwrite에는 키 분포 옵션이 없어서, 그때는 YCSB나 다른 벤치마크를 붙여야 해요.
 - **공간 부족:** 93%는 공간 증폭이 크면 장치가 넘쳐요. 인구의 PC 보정값(`SPACE_AMP`)을 꼭 넣고, `pilot.py calc`에 경고가 없는지 확인하세요.
@@ -120,4 +150,6 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 
 - Lan et al., FDP: The Data Placement Promise of Modern NVMe SSDs — https://arxiv.org/html/2610.02676v2
 - Lan 실험 저장소 (RocksDB 패치, OPTIONS 파일, 스크립트, MIT 라이선스) — https://github.com/sijielan/FDP_Benchmarking
+- Song et al., Characterizing and Emulating FDP SSDs with WARP (FAST'26) — https://www.usenix.org/system/files/fast26-song.pdf
+- WARP 공개 스크립트(FEMU 설정, OP 계산식) — https://github.com/MoatLab/WARP-FAST26-AE
 - TorFS — https://github.com/SamsungDS/TorFS

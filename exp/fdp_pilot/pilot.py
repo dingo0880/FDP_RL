@@ -215,9 +215,11 @@ def cmd_counters(a):
 # FEMU 사용량 로그(vendor log C1h, 이 브랜치의 hw/femu/nvme.h FemuFdpUsageLog)
 #   머리 64 B: version u16, nruh u16, page_bytes u32, valid_pages u64, capacity_bytes u64
 #   RUH마다 32 B: hbmw u64, mbmw u64, live_pages u64
-#   mbmw에는 그 RUH의 host 쓰기와, 그 RUH의 RU를 GC할 때 옮긴 양이 같이 잡혀요.
-#   live_pages는 그 RUH가 가진 RU에 지금 있는 유효 페이지예요. II에서는 GC로 옮긴
-#   데이터가 마지막 RUH의 RU에 모이니, 그 몫은 마지막 RUH에 잡혀요.
+#   mbmw에는 그 RUH의 host 쓰기와, 그 RUH가 가진 RU를 GC할 때 옮긴 양이 같이 잡혀요.
+#   live_pages는 그 RUH가 가진 RU에 지금 있는 유효 페이지예요.
+#   II에서는 GC로 옮긴 데이터가 마지막 RUH의 RU에 모여요. 그래서 데이터가 원래 RUH에서
+#   처음 옮겨질 때만 원래 RUH의 mbmw에 잡히고, 그 뒤 다시 옮겨지면 마지막 RUH에 잡혀요.
+#   즉 RUH별 mbmw는 데이터 종류(PID)별 GC 비용이 아니에요 (README "II에서 RUH별 값을 읽는 법").
 FEMU_USAGE_HDR = struct.Struct("<HHIQQ40x")
 FEMU_USAGE_DESC = struct.Struct("<QQQ8x")
 
@@ -510,7 +512,8 @@ def cmd_summary(a):
               f"{pct(peak):>12}{pct(used_tail):>8}  {ruh}")
     if any(r["ruh_media"] for r in res):
         print()
-        print("RUH별 media 비율 (그 RUH의 host 쓰기 + 그 RUH의 RU를 GC로 옮긴 양, overwrite 구간)")
+        print("RUH별 media 비율 (그 RUH의 host 쓰기 + 그 RUH가 가진 RU를 GC로 옮긴 양, overwrite 구간)")
+        print("  II에서는 다시 옮겨지는 GC 데이터가 마지막 RUH에 잡혀요. 데이터 종류별 GC 비용이 아니에요.")
         for r in res:
             if r["ruh_media"]:
                 print(f"  {r['run']:<20}" + " ".join(f"{p}:{s*100:.0f}%" for p, s in r["ruh_media"].items()))
