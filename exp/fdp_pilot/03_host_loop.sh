@@ -96,12 +96,15 @@ for POL in $POLICIES; do
     fi
 
     # 3) run 하나를 게스트에서 백그라운드로 실행 (ssh가 끊겨도 계속 돌게 nohup)
+    #    OVERWRITE_MULT 는 호스트에서 정한 값을 그대로 넘겨요. 안 넘기면 게스트가 자기 config.env 를 다시 읽어
+    #    기본값(3)이 되어서, 호스트에서 OVERWRITE_MULT=1 ./03_host_loop.sh 로 준 값이 무시돼요.
     #    이전에 덜 끝난 같은 폴더가 있으면 지우고 새로 시작
     #    { … & } 로 nohup 만 백그라운드로 보내야 ssh가 바로 돌아와요. 감싸지 않으면
     #    "A && B && nohup … &" 전체가 백그라운드 서브셸이 되고, 그 서브셸이 ssh 출력을
     #    run이 끝날 때까지 쥐고 있어서 ssh가 안 돌아와요.
     gssh "$GUEST_ENV && rm -rf \"\$RESULTS/$TAG\" && \
           { nohup sudo -n -E env WORK=\"\$WORK\" RESULTS=\"\$RESULTS\" FORCE=1 FRESH_FEMU=1 NO_SUMMARY=1 REP=$REP \
+              OVERWRITE_MULT=$OVERWRITE_MULT \
               ./02_femu_run.sh '$POL' '$U' > \"\$HOME/fdp_run_$TAG.log\" 2>&1 < /dev/null & \
             echo \$! > \"\$HOME/fdp_run_$TAG.pid\"; } && echo started"
 

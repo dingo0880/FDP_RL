@@ -16,11 +16,14 @@
 # =====================================================================
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+OVERWRITE_MULT_FROM_ENV="${OVERWRITE_MULT:-}"     # config.env 를 읽기 전에 밖에서 받은 값을 기록
 set -a; . "$HERE/config.env"; set +a
 . "$HERE/lib/dbbench_args.sh"
+. "$HERE/lib/runlib.sh"
 
 DB_BENCH="$WORK/bin/db_bench_torfs"
 TORFS_DB_DIR="${TORFS_DB_DIR:-$WORK/torfs_db}"   # TorFS가 쓰는 로컬 보조 폴더 (Lan도 이렇게 씀)
+                                                 #   RocksDB LOG 도 여기 로컬 파일로 생겨요 (lib/runlib.sh 참고)
 FS_URI="torfs:xnvme:${NG_DEV}?be=io_uring_cmd"
 [[ -x "$DB_BENCH" ]] || { echo "먼저 ./00_build.sh femu 를 실행하세요."; exit 1; }
 
@@ -52,9 +55,10 @@ if [[ "${EXPECT_RUHT:-any}" != "any" ]]; then
   fi
 fi
 
-sample() {   # $1 = run 폴더
-  local d="$1" ph ts
-  ph=$(cat "$d/phase" 2>/dev/null || echo end); ts=$(date +%s)
+sample() {   # $1 = run 폴더, $2 = phase 이름 (없으면 phase 파일)
+  local d="$1" ph="${2:-}" ts
+  [[ -n "$ph" ]] || ph=$(cat "$d/phase" 2>/dev/null || echo end)
+  ts=$(now_ms)
   read -r H M < <(python3 "$HERE/pilot.py" counters)
   echo "$ts,$ph,$H,$M" >> "$d/counters.csv"
   case "$RUH_METHOD" in
@@ -96,6 +100,14 @@ for POL in $POLICIES; do
     python3 "$HERE/pilot.py" lbasize > "$RUN/lba_bytes"
     python3 "$HERE/pilot.py" ruhtypes > "$RUN/ruh_types" 2>/dev/null || echo "읽기 실패" > "$RUN/ruh_types"
     dbbench_common_args "$U"
+    write_run_params "$RUN" \
+      "script=02_femu_run.sh" "policy=$POL" "util=$U" "REP=$REP" "SCALE=1 (FEMU는 크기 줄이기 없음)" \
+      "TORFS_FORCE_PID=${TORFS_FORCE_PID:-unset}  (single=0, lan=unset -> Lan 패치의 레벨별 hint)" \
+      "N(--num)=$N" "W(--writes, 스레드당)=$W" \
+      "overwrite 전체 연산 수 = W x THREADS = $((W * THREADS))" \
+      "논리 데이터 대비 배수 = W x THREADS / N = $(python3 -c "print(f'{$W*$THREADS/$N:.4f}')")" \
+      "logical_bytes = N x (KEY_SIZE + VALUE_SIZE) = $(( N * (KEY_SIZE + VALUE_SIZE) ))" \
+      "TORFS_DB_DIR=$TORFS_DB_DIR" "FS_URI=$FS_URI" "RESULTS=$RESULTS" "db_bench=$DB_BENCH"
     { echo "policy=$POL util=$U N=$N W_per_thread=$W threads=$THREADS lba_bytes=$(cat "$RUN/lba_bytes")"
       echo "TORFS_FORCE_PID=${TORFS_FORCE_PID:-unset} fs_uri=$FS_URI"
       echo "config:"; grep -v '^\s*#' "$HERE/config.env" | grep -v '^\s*$'
@@ -109,28 +121,36 @@ for POL in $POLICIES; do
       *)    echo "ts,phase,pid,value" > "$RUN/ruh.csv" ;;
     esac
 
-    # 3) 샘플러
-    echo idle > "$RUN/phase"; sample "$RUN"
-    ( while [[ -f "$RUN/phase" ]]; do sleep "$SAMPLE_SEC"; [[ -f "$RUN/phase" ]] && sample "$RUN"; done ) &
-    SAMPLER=$!
+    # 3) 샘플러: SAMPLE_SEC 마다 + 단계가 바뀔 때 (바뀌기 전·후 이름으로 한 번씩, lib/runlib.sh start_sampler)
+    #    단계: idle -> load_open -> load -> load_wait -> load_logsave
+    #          -> overwrite_open -> overwrite -> overwrite_wait -> overwrite_logsave -> end
+    #    주 WAF·뒤 1/3·RUH 비율은 overwrite(실제 실행) 구간만, 대기·LOG 저장 중 쓰기는 summary 에 따로 나와요.
+    set_phase "$RUN" idle
+    start_sampler "$RUN" "$SAMPLE_SEC" sample
 
     # 4) load: 키 N개를 겹치지 않게 랜덤 순서로 한 번씩
-    echo load > "$RUN/phase"; sample "$RUN"
-    "$DB_BENCH" --db="$TORFS_DB_DIR" --fs_uri="$FS_URI" "${DB_ARGS[@]}" \
-      --benchmarks=filluniquerandom,waitforcompaction --threads=1 --num="$N" \
-      > "$RUN/db_bench_load.log" 2>&1
-    sample "$RUN"
+    #    stdout·stderr 는 db_bench_load.stdout / .stderr 로 따로, LOG 옵션 대조는 options_check_load.txt
+    rc=0
+    run_dbbench load "$RUN" "$TORFS_DB_DIR" \
+      "$DB_BENCH" --db="$TORFS_DB_DIR" --fs_uri="$FS_URI" "${DB_ARGS[@]}" \
+      --benchmarks=filluniquerandom,waitforcompaction --threads=1 --num="$N" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+      rm -f "$RUN/phase"; wait "$SAMPLER" 2>/dev/null || true; echo "[femu] load 실패 (rc=$rc): $RUN"; exit $rc
+    fi
 
-    # 5) overwrite: 같은 키들을 랜덤으로 덮어쓰기 (이 구간의 WAF 를 봄)
-    echo overwrite > "$RUN/phase"; sample "$RUN"
-    "$DB_BENCH" --db="$TORFS_DB_DIR" --fs_uri="$FS_URI" "${DB_ARGS[@]}" --use_existing_db=1 \
-      --benchmarks=overwrite,waitforcompaction,levelstats --threads="$THREADS" \
-      --num="$N" --writes="$W" \
-      > "$RUN/db_bench_overwrite.log" 2>&1
-    sample "$RUN"
+    # 5) overwrite: 같은 키들을 랜덤으로 덮어쓰기 (이 구간의 WAF 를 봄). load 와 따로 한 프로세스, 중간에 다시 열지 않음
+    run_dbbench overwrite "$RUN" "$TORFS_DB_DIR" \
+      "$DB_BENCH" --db="$TORFS_DB_DIR" --fs_uri="$FS_URI" "${DB_ARGS[@]}" --use_existing_db=1 \
+      --benchmarks=overwrite,waitforcompaction,levelstats,stats --threads="$THREADS" \
+      --num="$N" --writes="$W" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+      rm -f "$RUN/phase"; wait "$SAMPLER" 2>/dev/null || true; echo "[femu] overwrite 실패 (rc=$rc): $RUN"; exit $rc
+    fi
+    grep -A 12 "Level Files Size" "$RUN/db_bench_overwrite.stdout" > "$RUN/levelstats.txt" || true
 
-    echo end > "$RUN/phase"; sample "$RUN"
-    rm -f "$RUN/phase"; kill "$SAMPLER" 2>/dev/null || true; wait "$SAMPLER" 2>/dev/null || true
+    set_phase "$RUN" end; sleep 2
+    rm -f "$RUN/phase"; wait "$SAMPLER" 2>/dev/null || true
+    python3 "$HERE/pilot.py" phasetimes "$RUN" > "$RUN/time.txt" || true
     unset TORFS_FORCE_PID
     date +%s > "$RUN/done"
     echo "[femu] 완료: $RUN"

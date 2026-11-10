@@ -31,7 +31,7 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 | 1 | 인구 | PC에서 db_bench 빌드 | `./00_build.sh pc` |
 | 2 | 인구 | 작은 크기로 스크립트 점검 | `SCALE=0.05 ./01_pc_calibrate.sh 0.70` |
 | 3 | 인구 | 실제 크기로 보정: 공간 증폭, 레벨 비중, MANIFEST 비중, 시간 | `./01_pc_calibrate.sh` |
-| 4 | 인구 | `config.env`의 `SPACE_AMP`를 3번 결과로 바꾸고 `python3 pilot.py calc`로 N 확인 | `config.env` |
+| 4 | 인구 | `python3 pilot.py pcfit <보정 폴더 두 개>`로 나온 `SPACE_SLOPE`·`SPACE_FIXED_GIB`를 `config.env`에 넣고 `python3 pilot.py calc`로 N 확인 | `config.env` |
 | 5 | 지윤 | FEMU 게스트에서 TorFS 포함 빌드 | `./00_build.sh femu` |
 | 6 | 지윤 | 게스트의 `config.env` ★ 항목 채우기(장치 이름, 용량, RU 크기, 카운터 방법) | 게스트 `config.env` |
 | 7 | 지윤 | 카운터 읽기 확인: `python3 pilot.py counters`가 숫자 두 개를 출력하는지. 1 GB 쓰고 host 값이 1 GB 늘었는지도 | — |
@@ -39,7 +39,7 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 | 9 | 지윤 | 본 파일럿 4 run (호스트에서) | `./03_host_loop.sh` |
 | 10 | 같이 | 결과 해석. 경계면 안내대로 `REP=2`로 93% 한 번 더 | `$HOST_RESULTS/summary.txt` |
 
-1–4와 5–8은 동시에 해도 돼요. 9는 4가 끝난 뒤에 해야 공간 부족 없이 돌아가요. 게스트와 호스트의 `SPACE_AMP`는 같은 값이어야 해요.
+1–4와 5–8은 동시에 해도 돼요. 9는 4가 끝난 뒤에 해야 공간 부족 없이 돌아가요. 게스트와 호스트의 `SPACE_SLOPE`·`SPACE_FIXED_GIB`는 같은 값이어야 해요.
 
 ### 호스트 준비 (8번)
 
@@ -60,9 +60,15 @@ FEMU 켜기 → 게스트에 ssh로 run 하나 실행 → 결과를 호스트로
 |---|---|---|---|
 | RocksDB | 7.2.2 + 레벨별 hint 패치 | 같음 (Lan 저장소의 패치를 그대로 적용) | TorFS가 이 조합으로 동작하는 게 Lan 저장소로 확인됨 |
 | TorFS | 커밋 0a6e399 | 같음 + `TORFS_FORCE_PID` 패치(single용) | single 정책을 같은 바이너리로 돌리려고 |
-| 레벨 수 | 6 (L0–L5) | 6 | — |
-| L1 : SST : memtable | 512 : 64 : 128 MB | 4 : 0.5 : 1 MB (같은 비율로 축소) | 장치가 작아서. 마지막 레벨 비중(Lan 약 64%, 파일럿 70–78%)과 RU당 SST 수(Lan 약 195, 파일럿 256)가 비슷해요 |
-| L0 trigger, merge, memtable 수 | 2, 2, 6 | 같음 | — |
+| LSM 설정 기준 | OPTIONS 파일의 `usertable` CF (YCSB가 쓰는 CF) | 같음 | 같은 파일의 `default` CF(L1 512 MB, 레벨 6, trigger 2, memtable 6)는 YCSB가 안 써요 |
+| 레벨 수 | 7 (L0–L6) | 7 | — |
+| L1 : SST : memtable | 256 : 64 : 128 MiB | 2.5 : 0.5 : 1 MiB (L1은 1/102.4, SST·memtable은 1/128) | 장치가 작아서. RU당 SST 수(Lan 약 195, 파일럿 256)가 비슷해요. L1을 2 MiB가 아니라 2.5 MiB로 둔 이유는 아래 "레벨 목표 크기" |
+| 레벨 목표 크기 (multiplier 10) | L1 256 MiB … L5 2.44 TiB | L1 2.5, L2 25, L3 250, L4 2,500, L5 25,000 MiB (24.41 GiB), L6 250,000 MiB | L1을 키우면 L1 다음 레벨도 모두 25% 커져요. 2 MiB(1/128)면 L5 목표가 19.53 GiB라 93%의 논리 데이터(약 19.1 GiB)가 L5 목표의 98%였어요. 마지막 레벨에는 거의 모든 키가 들어가서, 넘치면 L6로 내려가며 같은 키가 겹쳐 쌓여요 |
+| L0 trigger, merge, memtable 수 | 4, 2, 24 | 같음 | — |
+| L0 slowdown / stop | 20 / 36 | 같음 (CLI로 직접 넘김) | — |
+| compaction 밀림 한도 (soft / hard) | 64 / 256 GiB | 0.5 / 2 GiB (1/128) | 한도를 그대로 두면 밀린 양이 작은 장치를 채워요 |
+| LOG 크기 제한 | (없음) | 미적용 | RocksDB 7.2.2 DBOptions에는 `max_log_file_size`·`keep_log_file_num`이 있지만 db_bench 7.2.2 CLI에는 플래그가 없어요. LOG가 커요 (아래) |
+| 밀렸을 때 쓰기 속도 (`delayed_write_rate`) | 16 MiB/s | 16 MiB/s (같음) | db_bench 기본은 8 MiB/s라 직접 넣어요 |
 | dynamic level bytes | false | false | 레벨 번호가 같아야 매핑이 같아요 |
 | 압축 | L2부터 LZ4 | 없음 | 쓰기량 단위가 압축률에 흔들리지 않게. Lan의 db_bench 실험도 압축을 껐어요 |
 | 값 크기 | YCSB 40 KB | 1 KB | 작은 장치에서 SST 하나에 레코드가 너무 적어지지 않게 (40 KB면 SST 하나에 12개) |
@@ -122,7 +128,28 @@ Lan 논문은 장치의 OP·물리 용량·RU 개수·격리 방식(II/PI)을 �
   - 파일럿은 II로만 돌려요. `FEMU_START_CMD`에 `fdp.isolation_mode=2`를 넣어요. PI 비교는 갈래 A에서 해요. RUH 수와 OP는 아래 "장치(FEMU) 설정과 근거"를 보세요.
   - `02_femu_run.sh`가 run마다 `nvme fdp configs`로 RUH 종류를 읽어 run 폴더의 `ruh_types`에 남기고, PID 0–4가 `EXPECT_RUHT`(II)가 아니면 멈춰요.
 - **workload:** 먼저 균등 랜덤으로 돌려요. 이득이 무너지는 게 재현되지 않으면 zipfian(일부 키에 쓰기가 쏠림, Lan의 YCSB-A와 비슷)을 다음에 시도해요. 7.2.2 db_bench의 overwrite에는 키 분포 옵션이 없어서, 그때는 YCSB나 다른 벤치마크를 붙여야 해요.
-- **공간 부족:** 93%는 공간 증폭이 크면 장치가 넘쳐요. 인구의 PC 보정값(`SPACE_AMP`)을 꼭 넣고, `pilot.py calc`에 경고가 없는지 확인하세요.
+- **실효 옵션 확인:** 스크립트는 옵션 파일 없이 CLI로만 넘겨요. 그래서 run마다 DB를 연 직후 RocksDB LOG의 `Options.*` 줄을 `config.env` 기대값과 대조해요 (`pilot.py optcheck`, 결과는 run 폴더의 `options_check_load.txt`·`options_check_overwrite.txt`, 근거는 `rocksdb_LOG_<단계>_head.txt`). 불일치·누락이면 run을 멈춰요 (`OPTCHECK_STRICT=0`이면 기록만). PC는 `PC_DB_DIR/LOG`, FEMU는 `TORFS_DB_DIR/LOG`(TorFS가 LOG를 로컬 파일시스템으로 넘겨요: TorFS 0a6e399 `TorFS::NewLogger`)를 봐요.
+- **단계 경계 (PC·FEMU 같음):** db_bench 는 load 한 번, overwrite 한 번만 열어요 (단계마다 다시 열면 WAL 복구·flush 로 상태가 바뀌어서). 프로세스 안의 경계는 출력에 찍은 시각으로 나눠요 (`lib/runlib.sh`).
+  - `<단계>_open` 프로세스 시작 → DB 열림 (LOG `DB pointer` 줄 시각, 마이크로초)
+  - `<단계>` 실제 실행 → 결과 줄(`overwrite : … micros/op`) 시각. db_bench 가 이 줄 뒤에 `fflush(stdout)` 해요
+  - `<단계>_wait` waitforcompaction(5초 쉬고 10초마다 확인, 마지막 `finished` 줄) + levelstats·stats → 프로세스 끝
+  - `<단계>_logsave` LOG 앞부분·OPTIONS·LOG 전체 gzip
+  - 시각은 `phase_events.txt`, 줄마다 받은 시각은 `db_bench_<단계>.stdout.ts`·`.stderr.ts`, 단계별 시간은 `time.txt`.
+  - `waitforcompaction` 줄은 db_bench 가 fflush 를 안 해서, stdout 을 줄 버퍼로 바꾸는 `liblinebuf.so`(`lib/linebuf.c`, 처음 실행 때 gcc 로 빌드)를 db_bench 에 LD_PRELOAD 로 올려요. `stdbuf` 는 안 써요: 이 PC 의 stdbuf(uutils coreutils 0.8.0)는 LD_PRELOAD 를 덮어써서 libnofsync.so 가 빠졌어요 (fsync 200번 0 ms → 1291 ms). 실제로 올라온 라이브러리는 `cmd_<단계>.txt` 에 `/proc/<pid>/maps` 로 남겨요.
+  - 샘플러(PC du 5초, FEMU 카운터 `SAMPLE_SEC`)는 1초마다 단계를 보고, 바뀌면 바뀌기 전·후 이름으로 한 번씩 찍어요. 그래서 각 단계의 첫·마지막 샘플이 경계에서 1~2초 안이에요.
+  - **주 WAF·뒤 1/3 WAF·뒤 1/3 사용률·RUH 비율은 `overwrite`(실제 실행) 구간만**으로 계산해요. 대기·LOG 저장 중 쓰기는 따로 보여 줘요 (PC: LOG 의 `table_file_creation` 합, FEMU: 카운터 차이). 공간·사용률 최대는 load·overwrite·대기·LOG 저장 전체에서 계속 모아요.
+- **NOFSYNC (PC 예비 보정):** PC 보정은 fsync 를 건너뛰어요 (`LD_PRELOAD=libnofsync.so`, WSL 에서 fsync 한 번 9~17 ms 라서). 그래서 PC 의 공간 식·시간은 예비값이에요. FEMU 의 검증된 공간 상한이나 성능 측정값으로 쓰지 마세요. `pcsummary`·`pctrack`·`pcfit` 출력에도 이 주의가 나와요.
+- **run 기록:** `run_params.txt`에 SCALE·OVERWRITE_MULT(밖에서 받은 값 포함)·SEED·THREADS·`--num`·스레드당 `--writes`·전체 overwrite 연산 수와 N 대비 배수·NOFSYNC/LD_PRELOAD·(FEMU) 정책과 `TORFS_FORCE_PID`를 남겨요. 실제 명령은 `cmd_<단계>.txt`, db_bench 출력은 `db_bench_<단계>.stdout`·`.stderr`로 따로 남겨요. 키 공간은 늘 `--num=N`이고 덮어쓰기 양은 `--writes`(스레드당) x 스레드 수로만 바꿔요.
+- **공간 (PC):** DB 폴더(`PC_DB_DIR`)는 실험용 이미지(`/dev/loop0` ext4, 50 GiB 고정 파일 `pcdisk.img`), 결과 폴더(`RESULTS`)는 WSL 루트(`/dev/sdd` ext4, 가상 디스크라 실제 한계는 C: 여유이고 커지면 안 줄어요)에 있어요.
+  - LOG 원본은 DB 폴더에 쌓이고 run 중에는 안 줄어요. 끝날 때 gzip 이 결과 폴더로 압축본을 만들지만 원본은 지우지 않아서, gzip 동안과 그 뒤에도 원본(DB 폴더)·압축본(결과 폴더)이 같이 있어요. 원본은 다음 단계(overwrite) 시작 직전이나 다음 사용률 run 시작 때(`PC_DB_DIR` 를 지움) 없어져요.
+  - 측정: SST 를 1 GiB 쓸 때 LOG 원본 약 4.5~5.1 MB, gzip 은 원본의 약 1/16.
+- **LOG 크기:** L1 2 MiB 70% load에서 2시간에 1.37 GB였어요. 대부분 SST마다 남는 `table_file_creation` 기록이에요. FEMU 게스트의 로컬 디스크 여유를 확인하세요. 전체 LOG는 run이 끝날 때 gzip으로 run 폴더에 남겨요 (`SAVE_FULL_LOG=0`이면 안 남김).
+- **진행 추적:** `TRACK_STATS=1`(기본)이면 db_bench에 `--stats_per_interval=1 --stats_dump_period_sec=60`을 더해, 60초마다 레벨별 크기·compaction·stall 통계가 stderr와 LOG에 찍혀요. `pilot.py pctrack <run 폴더>`가 로그만 읽어서 1배·2배·3배 근처 샘플(전체 스레드 누적 완료 연산 수가 N·2N·3N을 처음 넘은 60초 샘플, 정확한 경계 아님), L5·L6 크기, L5→L6 compaction, 공간 최대와 뒤 1/3 평균, stall을 정리해요. pending compaction 바이트는 60초 통계에 없어서 연속값은 없고, LOG의 stall 경고(soft 한도 이상일 때)로만 보여요.
+- **공간 부족:** 93%는 공간이 예상보다 크면 장치가 넘쳐요. 인구의 PC 보정값(`SPACE_SLOPE`·`SPACE_FIXED_GIB`)을 꼭 넣고, `pilot.py calc`에 경고가 없는지 확인하세요.
+  - 공간 식이 곱하기(공간 증폭) 하나가 아니라 "기울기 x 논리 + 고정량"인 이유: 레벨 크기를 고정해서(dynamic level bytes 끔) L1~L4가 데이터 양과 상관없이 거의 일정해요. 그래서 공간 증폭은 데이터가 작을수록 커져요 (L1 4 MB 보정: 70% 1.335, 93% 1.261 → 기울기 1.035, 고정량 4.30 GiB로 두 점이 다 맞음).
+  - 지금 `config.env`의 `SPACE_SLOPE=1.034`, `SPACE_FIXED_GIB=2.6875`는 임시값이에요 (L1 2.5 MiB·레벨 7 실측 아님). 같은 새 설정으로 70%·93%를 보정한 뒤 `pcfit`으로 다시 맞춰야 해요.
+  - `SPACE_MARGIN=0.02` 때문에 모델상 실제 최고 사용률은 목표 / 1.02예요: 목표 93% → 약 91.2%, 70% → 약 68.6%.
+  - `calc`는 논리 데이터를 마지막 레벨의 목표 크기와 비교해서 보여 줘요. 마지막 레벨에는 거의 모든 키가 들어가서, 이게 100%를 넘으면 한 레벨 아래로 내려가기 시작하고 같은 키가 두 레벨에 겹쳐 쌓여 공간이 식보다 커져요.
 - **시험한 것:**
   - `03_host_loop.sh`는 가짜 FEMU·ssh로 시험했어요. 4 run 반복, `REP=2` 평균, 끝난 run 건너뛰기, 실패 시 멈춤, 접속이 잠깐 끊겼을 때 다시 확인하기, 판정 4가지(무너짐 / 안 무너짐 / 경계 / 보류)를 확인했어요.
   - 가짜 ssh 시험에서는 원격 실행 줄이 run 끝까지 안 돌아오는 문제가 안 보였어요. 출력 연결을 끝까지 기다리는 방식으로 다시 시험해서 `{ nohup … & }`로 고쳤어요.
