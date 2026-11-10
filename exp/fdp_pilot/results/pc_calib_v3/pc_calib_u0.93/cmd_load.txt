@@ -1,0 +1,5 @@
+/home/cps/fdp_pilot_work/bin/db_bench_pc --db=/home/cps/fdp_pilot_work/pcdisk/pcdb_v3 --key_size=16 --value_size=1024 --num_levels=7 --max_bytes_for_level_base=2621440 --max_bytes_for_level_multiplier=10 --target_file_size_base=524288 --target_file_size_multiplier=1 --write_buffer_size=1048576 --max_write_buffer_number=24 --min_write_buffer_number_to_merge=2 --level0_file_num_compaction_trigger=4 --level0_slowdown_writes_trigger=20 --level0_stop_writes_trigger=36 --soft_pending_compaction_bytes_limit=536870912 --hard_pending_compaction_bytes_limit=2147483648 --delayed_write_rate=16777216 --level_compaction_dynamic_level_bytes=false --compression_type=none --max_background_jobs=4 --seed=1 --statistics --stats_interval_seconds=60 --histogram=false --stats_per_interval=1 --stats_dump_period_sec=60 --benchmarks=filluniquerandom\,waitforcompaction --threads=1 --num=19165968 
+LD_PRELOAD=/home/cps/fdp_pilot_work/bin/liblinebuf.so:/home/cps/fdp_pilot_work/overnight_v3/libnofsync.so  (db_bench 프로세스에만)
+로드된 preload 라이브러리 (/proc/36615/maps):
+  liblinebuf.so
+  libnofsync.so

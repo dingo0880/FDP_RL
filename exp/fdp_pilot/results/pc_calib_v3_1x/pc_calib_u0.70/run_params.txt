@@ -1,0 +1,19 @@
+# 스크립트가 최종으로 정한 값 (2026-11-09 10:07:59)
+script=01_pc_calibrate.sh
+util=0.70
+SCALE=1
+N_full=13762347 W_per_thread_full=3440587  (pilot.py calc, SCALE 곱하기 전)
+N(--num)=13762347
+W(--writes, 스레드당)=3440587
+overwrite 전체 연산 수 = W x THREADS = 13762348
+논리 데이터 대비 배수 = W x THREADS / N = 1.0000
+logical_bytes = N x (KEY_SIZE + VALUE_SIZE) = 14312840880
+PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb_v3
+RESULTS=/home/cps/fdp_pilot_work/results_v3_1x
+db_bench=/home/cps/fdp_pilot_work/bin/db_bench_pc
+OVERWRITE_MULT=1  (밖에서 받은 값: 1)
+SEED=1
+THREADS=4  (load 는 1)
+TRACK_STATS=1 STATS_INTERVAL_SEC=60 SAVE_FULL_LOG=1 OPTCHECK_STRICT=1
+LD_PRELOAD(밖에서)=/home/cps/fdp_pilot_work/overnight_v3b/libnofsync.so  (+ db_bench 에는 liblinebuf.so 를 앞에 붙임)
+NOFSYNC=1 (fsync·fdatasync·sync_file_range 를 건너뜀: PC 예비 보정용. FEMU 공간 상한·성능값 아님)

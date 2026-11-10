@@ -1,0 +1,22 @@
+# 스크립트가 최종으로 정한 값 (2026-11-07 17:00:46)
+script=01_pc_calibrate.sh
+util=0.93
+SCALE=1
+N_full=19165968 W_per_thread_full=14374476  (pilot.py calc, SCALE 곱하기 전)
+N(--num)=19165968
+W(--writes, 스레드당)=14374476
+overwrite 전체 연산 수 = W x THREADS = 57497904
+논리 데이터 대비 배수 = W x THREADS / N = 3.0000
+logical_bytes = N x (KEY_SIZE + VALUE_SIZE) = 19932606720
+PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb_v3
+RESULTS=/home/cps/fdp_pilot_work/results_v3
+db_bench=/home/cps/fdp_pilot_work/bin/db_bench_pc
+OVERWRITE_MULT=3  (밖에서 받은 값: 3)
+SEED=1
+THREADS=4  (load 는 1)
+TRACK_STATS=1 STATS_INTERVAL_SEC=60 SAVE_FULL_LOG=1 OPTCHECK_STRICT=1
+LD_PRELOAD(밖에서)=/home/cps/fdp_pilot_work/overnight_v3/libnofsync.so  (+ db_bench 에는 liblinebuf.so 를 앞에 붙임)
+NOFSYNC=1 (fsync·fdatasync·sync_file_range 를 건너뜀: PC 예비 보정용. FEMU 공간 상한·성능값 아님)
+
+# point_at.py 로 만든 파생 폴더: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.93 의 3배 run 에서 1.0배 지점까지(epoch 1794111641)의 du.csv 만 잘라 둠.
+# (3배 run 진행 줄 기준 3.00배까지 기록됨.) 이 점은 '1.0배까지 덮어쓴 동안의 최고 사용량'이에요 (1배로 끝까지 돌린 run 과 달리 끝의 waitforcompaction 구간은 없음, 진행 보간이라 근사).

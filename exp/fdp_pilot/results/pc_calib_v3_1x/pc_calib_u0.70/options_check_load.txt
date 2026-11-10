@@ -1,0 +1,36 @@
+== RocksDB 실효 옵션 확인: /home/cps/fdp_pilot_work/results_v3_1x/pc_calib_u0.70/rocksdb_LOG_load_head.txt
+   기대값: config.env (lib/dbbench_args.sh 가 CLI로 넘긴 값). LOG 형식: RocksDB 7.2.2 options/options.cc, options/db_options.cc
+   항목                                                           기대                      관측  결과
+   num_levels                                                    7                       7  통과
+   max_bytes_for_level_base                                2621440                 2621440  통과
+   max_bytes_for_level_multiplier                             10.0               10.000000  통과
+   target_file_size_base                                    524288                  524288  통과
+   target_file_size_multiplier                                   1                       1  통과
+   write_buffer_size                                       1048576                 1048576  통과
+   max_write_buffer_number                                      24                      24  통과
+   min_write_buffer_number_to_merge                              2                       2  통과
+   level0_file_num_compaction_trigger                            4                       4  통과
+   level0_slowdown_writes_trigger                               20                      20  통과
+   level0_stop_writes_trigger                                   36                      36  통과
+   level_compaction_dynamic_level_bytes                          0                       0  통과
+   soft_pending_compaction_bytes_limit                   536870912               536870912  통과
+   hard_pending_compaction_bytes_limit                  2147483648              2147483648  통과
+   delayed_write_rate                                     16777216                16777216  통과
+   max_background_jobs                                           4                       4  통과
+   disable_auto_compactions                                      0                       0  통과
+   compaction_style                          kCompactionStyleLevel   kCompactionStyleLevel  통과
+   compression_per_level                                   (비어 있음)   (compression[i] 줄 없음)  통과  (Options.compression 하나가 모든 레벨에 적용)
+   compression                                       NoCompression           NoCompression  통과
+   bottommost_compression                                 Disabled                Disabled  통과
+   max_bytes_for_level_multiplier_addtl[0]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[1]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[2]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[3]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[4]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[5]                       1                       1  통과
+   max_bytes_for_level_multiplier_addtl[6]                       1                       1  통과
+   max_log_file_size                                         (미적용)                       0  정보: 미적용  (LOG 크기 제한 미적용: DBOption 은 있으나 db_bench 7.2.2 CLI 플래그가 없음 (기본 0 = 제한 없음))
+   keep_log_file_num                                         (미적용)                    1000  정보: 미적용  (LOG 개수 제한 미적용: DBOption 은 있으나 db_bench 7.2.2 CLI 플래그가 없음 (기본 1000))
+   stats_dump_period_sec                                         -                      60  정보  (LOG 통계 출력 간격 (추적용, LSM 동작과 무관))
+   max_open_files                                                -                      -1  정보  (열린 파일 수 제한 (-1 = 제한 없음))
+결과: 통과 28 / 불일치 0 / 누락 0

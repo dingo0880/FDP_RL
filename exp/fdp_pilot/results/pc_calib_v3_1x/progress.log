@@ -1,0 +1,5 @@
+[2026-11-08 18:36:33] 대기 중: 93% 3배(overnight_v3)가 끝나면 70% 를 1배로 시작해요
+[2026-11-09 10:07:57] 시작 (사용률 0.70, OVERWRITE_MULT=1 NOFSYNC=1 PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb_v3 RESULTS=/home/cps/fdp_pilot_work/results_v3_1x ulimit -n=1048576)
+[2026-11-09 10:07:57] 실행 중: 사용률 0.70, 덮어쓰기 1배 (로그: /home/cps/fdp_pilot_work/overnight_v3b/run_u0.70.log)
+[2026-11-09 17:16:17] 끝: /home/cps/fdp_pilot_work/results_v3_1x/pc_calib_u0.70 (428 분)
+[2026-11-09 17:16:43] 보고서 작성 중

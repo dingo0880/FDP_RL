@@ -1,0 +1,17 @@
+== overwrite 진행 추적: /home/cps/fdp_pilot_work/results_v3_1x/pc_calib_u0.70
+  N = 13,762,347 (키 공간 --num), 스레드 4, 계획 연산 수 = 13,762,348
+  overwrite 실행 구간: DB 열림 ~ 결과 줄 = 293.5분
+  진행 샘플 277개 (thread 0 진행 줄마다 1개). 연산 수는 스레드별 진행 줄을 보간한 추정이에요.
+  레벨별 크기 통계(--stats_per_interval): 있음
+  끝난 뒤 완료 연산 수 (statistics 카운터, 정확): 13,762,348 = 1.000000N (3N 대비 -27,524,693)
+  pending compaction 바이트: 60초 통계(rocksdb.stats)에는 없음 -> 누락. LOG 의 stall 경고(soft 한도 이상일 때만): 139644줄
+  1배: 진행 샘플 안에서는 1N 에 닿지 않음 (마지막 추정 13,720,619회). 끝난 뒤 정확한 완료 수는 13,762,348 = 1.0000N 이라 1N 은 마지막 진행 샘플 (경과 292.8분, 추정 0.997N) 뒤, overwrite 가 끝나기 전 어딘가예요 (시각은 그 범위로만 알 수 있음)
+  2배: 계획 연산 수(13,762,348)가 2N(27,524,694)보다 적어서 없음
+  3배: 계획 연산 수(13,762,348)가 3N(41,287,041)보다 적어서 없음
+  실행 구간 (경계 = 근처 샘플 시각, 마지막은 결과 줄 시각):
+    시작~실행 끝: L5->L6 compaction 0번 (0.00 GiB 출력), trivial move 0번; 공간 최대 16.55 GiB; pending stall 경고 139285줄 (최대 1.69 GiB)
+  overwrite 실행 전체: 공간 최대 16.55 GiB, 뒤 1/3 평균 16.52 GiB (용량 대비 68.8%) (대기·LOG 저장 제외)
+  대기 구간 (따로, 주 수치에서 뺌): 1.6분 (마지막 waitforcompaction finished 까지 1.6분); 추가 SST 쓰기 1.06 GiB; L5->L6 compaction 0번; 공간 최대 16.54 GiB; pending stall 경고 359줄
+  load·overwrite·대기 전체 공간 최대: 16.55 GiB (overwrite 단계)
+  [주의] NOFSYNC=1 (fsync 건너뜀) PC 예비 보정이에요. FEMU 의 검증된 공간 상한이나 성능(시간) 측정값으로 쓰지 마세요.
+  샘플별 값: /home/cps/fdp_pilot_work/results_v3_1x/pc_calib_u0.70/track.csv

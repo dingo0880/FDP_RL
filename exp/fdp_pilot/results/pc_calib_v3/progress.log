@@ -1,0 +1,9 @@
+[2026-11-07 17:00:45] 시작 (UTILS=0.93 0.70 OVERWRITE_MULT=3 NOFSYNC=1 PC_DB_DIR=/home/cps/fdp_pilot_work/pcdisk/pcdb_v3 RESULTS=/home/cps/fdp_pilot_work/results_v3 ulimit -n=1048576)
+[2026-11-07 17:00:45] 실행 중: 사용률 0.93 (로그: /home/cps/fdp_pilot_work/overnight_v3/run_u0.93.log)
+[2026-11-08 18:31:42] 93% overwrite 일시정지 (kill -STOP 178772, thread 0 누적 7160000 / 14374476). 사용자 결정: 70%를 1배로 먼저 따로 실행 (overnight_v3b). 재개: kill -CONT 178772
+[2026-11-08 18:34:25] 93% overwrite 재개 (kill -CONT 178772, 일시정지 약 2분). 원래 계획대로 계속: 93% 3배 -> 70% 3배
+[2026-11-08 18:36:23] 사용자 결정: 93% 3배 계속, 70% 는 1배로 overnight_v3b 에서 실행. 이 파이프라인은 93% 뒤 70% 3배를 건너뜀 (ABORT 표시)
+[2026-11-09 10:04:15] 끝: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.93 (2463 분)
+[2026-11-09 10:07:38] 건너뜀 (ABORT): /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.70
+[2026-11-09 10:07:38] 중단: 사용률 0.70 실패 -> 다음 사용률은 시작하지 않아요 (DB: /home/cps/fdp_pilot_work/pcdisk/pcdb_v3, 부분 결과: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.70)
+[2026-11-09 10:07:38] 보고서 작성 중

@@ -1,0 +1,72 @@
+FDP 파일럿 본 PC 보정 v3 (2026-11-09 10:07:39)
+설정: L1 2.5 MiB, 레벨 7, SST 0.5 / memtable 1 MiB, usertable 1/128, 24 GiB 기준 N, OVERWRITE_MULT=3 (93%·70%)
+NOFSYNC=1: PC 예비 보정. 공간 식·시간을 FEMU 의 검증된 공간 상한·성능값으로 쓰지 마세요.
+보정 크기(N)는 임시 공간 식 1.034 x 논리 + 2.6875 GiB (실측 아님) 로 정했어요.
+새 공간 식(pcfit)은 NOFSYNC=1 PC 예비 보정값이에요. FEMU 의 검증된 공간 상한이 아니에요.
+!! 사용률 0.70 에서 실패해 멈췄어요. 부분 결과만 있어요 (/home/cps/fdp_pilot_work/overnight_v3/run_u0.70.log).
+
+==================== 사용률 0.93
+== PC 보정 결과: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.93 ==
+  논리 데이터      : 18.56 GiB
+  최대 사용량      : 22.07 GiB (용량 24 GiB 대비 91.9%)
+  overwrite 실행   : 최대 22.07 GiB, 뒤 1/3 평균 22.00 GiB (용량 대비 91.6%) (대기·LOG 저장 제외, du.csv, LOG 파일 제외)
+  단계별 (시간 / 공간 최대):
+    load_open                0초  최대 0.05 GiB
+    load                 32914초  최대 18.96 GiB
+    load_wait              560초  최대 18.96 GiB
+    load_logsave           101초  최대 18.95 GiB
+    overwrite_open         119초  최대 18.95 GiB
+    overwrite           113823초  최대 22.07 GiB
+    overwrite_wait          97초  최대 22.05 GiB
+    overwrite_logsave       59초  최대 21.88 GiB
+  전체 최대는 overwrite 단계에서 나왔어요 (22.07 GiB)
+  SST 쓰기 (load, LOG table_file_creation): 실행 중 405.13 GiB, 대기 중 추가 1.04 GiB (flush+compaction, 대기 중 추가분은 주 수치에서 뺌)
+  SST 쓰기 (overwrite, LOG table_file_creation): 실행 중 1391.45 GiB, 대기 중 추가 0.93 GiB (flush+compaction, 대기 중 추가분은 주 수치에서 뺌)
+  [주의] NOFSYNC=1 (fsync 건너뜀) PC 예비 보정이에요. FEMU 의 검증된 공간 상한이나 성능(시간) 측정값으로 쓰지 마세요.
+  공간 증폭        : 1.189   (참고. FEMU 계산은 pcfit 의 기울기+고정량을 써요)
+  레벨별 비중      : L0 0.0%, L1 0.0%, L2 0.1%, L3 1.1%, L4 11.3%, L5 87.4%, L6 0.0%
+  레벨별 크기(GiB) : L0 0.00, L1 0.00, L2 0.02, L3 0.24, L4 2.44, L5 18.86, L6 0.00
+  host 쓰기(근사)  : 1448.6 GiB (compaction+flush 1392.4, WAL 56.2; overwrite 프로세스 전체 = 실행+대기)
+  MANIFEST 비중    : 0.021% (최대 파일 크기 기준 근사)
+  단계별 시간(초):
+    load_open_sec=0.1 load_exec_sec=32913.9 load_wait_sec=560.0 load_logsave_sec=101.1 load_wait_until_last_finished_sec=546.6
+    overwrite_open_sec=119.3 overwrite_exec_sec=113823.4 overwrite_wait_sec=97.1 overwrite_logsave_sec=59.0 overwrite_wait_until_last_finished_sec=95.0
+
+== overwrite 진행 추적: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.93
+  N = 19,165,968 (키 공간 --num), 스레드 4, 계획 연산 수 = 57,497,904
+  overwrite 실행 구간: DB 열림 ~ 결과 줄 = 1897.1분
+  진행 샘플 1752개 (thread 0 진행 줄마다 1개). 연산 수는 스레드별 진행 줄을 보간한 추정이에요.
+  레벨별 크기 통계(--stats_per_interval): 있음
+  끝난 뒤 완료 연산 수 (statistics 카운터, 정확): 57,497,904 = 3.000000N (3N 대비 +0)
+  pending compaction 바이트: 60초 통계(rocksdb.stats)에는 없음 -> 누락. LOG 의 stall 경고(soft 한도 이상일 때만): 598064줄
+  1배 근처 샘플 (정확한 경계 아님): 경과 659.2분, 추정 19,198,220회 = 1.002N (바로 앞 샘플 1.000N, 658.2분)
+      레벨(GiB): L0 0.00 L1 0.00 L2 0.03 L3 0.26 L4 2.57 L5 18.86; 공간(du) 21.84 GiB; stall 누적 84.0%; pending slowdown 199598회, stop 0회
+  2배 근처 샘플 (정확한 경계 아님): 경과 1285.3분, 추정 38,358,775회 = 2.001N (바로 앞 샘플 2.000N, 1284.2분)
+      레벨(GiB): L0 0.00 L1 0.01 L2 0.03 L3 0.26 L4 2.58 L5 18.86; 공간(du) 21.94 GiB; stall 누적 84.8%; pending slowdown 398773회, stop 131회
+  3배: 진행 샘플 안에서는 3N 에 닿지 않음 (마지막 추정 57,466,756회). 끝난 뒤 정확한 완료 수는 57,497,904 = 3.0000N 이라 3N 은 마지막 진행 샘플 (경과 1896.1분, 추정 2.998N) 뒤, overwrite 가 끝나기 전 어딘가예요 (시각은 그 범위로만 알 수 있음)
+  실행 구간 (경계 = 근처 샘플 시각, 마지막은 결과 줄 시각):
+    시작~1배: L5->L6 compaction 0번 (0.00 GiB 출력), trivial move 0번; 공간 최대 21.86 GiB; pending stall 경고 199594줄 (최대 1.69 GiB)
+    1배~2배: L5->L6 compaction 0번 (0.00 GiB 출력), trivial move 0번; 공간 최대 21.96 GiB; pending stall 경고 199176줄 (최대 2.00 GiB)
+    2배~실행 끝: L5->L6 compaction 0번 (0.00 GiB 출력), trivial move 0번; 공간 최대 22.07 GiB; pending stall 경고 199038줄 (최대 1.69 GiB)
+  overwrite 실행 전체: 공간 최대 22.07 GiB, 뒤 1/3 평균 22.00 GiB (용량 대비 91.6%) (대기·LOG 저장 제외)
+  대기 구간 (따로, 주 수치에서 뺌): 1.6분 (마지막 waitforcompaction finished 까지 1.6분); 추가 SST 쓰기 0.93 GiB; L5->L6 compaction 0번; 공간 최대 22.05 GiB; pending stall 경고 256줄
+  load·overwrite·대기 전체 공간 최대: 22.07 GiB (overwrite 단계)
+  [주의] NOFSYNC=1 (fsync 건너뜀) PC 예비 보정이에요. FEMU 의 검증된 공간 상한이나 성능(시간) 측정값으로 쓰지 마세요.
+  샘플별 값: /home/cps/fdp_pilot_work/results_v3/pc_calib_u0.93/track.csv
+  LOG 크기:
+    load LOG 원본 2077356734 B
+    load LOG gzip 130586278 B
+    overwrite LOG 원본 7317756676 B
+    overwrite LOG gzip 456369437 B
+
+==================== 사용률 0.70
+  (summary.txt 없음 - 실패. /home/cps/fdp_pilot_work/overnight_v3/run_u0.70.log 확인)
+
+!! 디스크 감시로 중단됨: 2026-11-08 18:36:23 디스크 문제 아님 — 사용자 결정(11/8): 93%는 3배로 끝까지, 70%는 1배로 overnight_v3b 에서 실행(results_v3_1x). 그래서 이 파이프라인은 70% 3배를 시작하지 않음
+
+==================== 디스크
+  Filesystem      Size  Used Avail Use% Mounted on
+  C:\             232G  201G   32G  87% /mnt/c
+  /dev/loop0       49G   29G   21G  59% /home/cps/fdp_pilot_work/pcdisk
+
+!! 2026-11-09 10:07:57 93% 3배 완료. 70% 는 3배 대신 1배로 overnight_v3b 에서 실행 중 (사용자 결정 11/8). 이 보고서의 '0.70 실패'는 그 때문이에요. 최종 보고서: FDP/pc_calib_results_v3_1x/REPORT.txt

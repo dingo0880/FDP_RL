@@ -1,0 +1,22 @@
+== PC 보정 결과: /home/cps/fdp_pilot_work/results_v3_1x/pc_calib_u0.70 ==
+  논리 데이터      : 13.33 GiB
+  최대 사용량      : 16.55 GiB (용량 24 GiB 대비 69.0%)
+  overwrite 실행   : 최대 16.55 GiB, 뒤 1/3 평균 16.52 GiB (용량 대비 68.8%) (대기·LOG 저장 제외, du.csv, LOG 파일 제외)
+  단계별 (시간 / 공간 최대):
+    load_open                0초  최대 0.16 GiB
+    load                  7837초  최대 13.61 GiB
+    load_wait               76초  최대 13.61 GiB
+    load_logsave            11초  최대 13.60 GiB
+    overwrite_open          10초  최대 13.60 GiB
+    overwrite            17609초  최대 16.55 GiB
+    overwrite_wait          97초  최대 16.54 GiB
+    overwrite_logsave       14초  최대 16.32 GiB
+  전체 최대는 overwrite 단계에서 나왔어요 (16.55 GiB)
+  SST 쓰기 (load, LOG table_file_creation): 실행 중 273.29 GiB, 대기 중 추가 1.15 GiB (flush+compaction, 대기 중 추가분은 주 수치에서 뺌)
+  SST 쓰기 (overwrite, LOG table_file_creation): 실행 중 313.94 GiB, 대기 중 추가 1.06 GiB (flush+compaction, 대기 중 추가분은 주 수치에서 뺌)
+  [주의] NOFSYNC=1 (fsync 건너뜀) PC 예비 보정이에요. FEMU 의 검증된 공간 상한이나 성능(시간) 측정값으로 쓰지 마세요.
+  공간 증폭        : 1.242   (참고. FEMU 계산은 pcfit 의 기울기+고정량을 써요)
+  레벨별 비중      : L0 0.0%, L1 0.0%, L2 0.2%, L3 1.5%, L4 15.0%, L5 83.3%, L6 0.0%
+  레벨별 크기(GiB) : L0 0.00, L1 0.00, L2 0.02, L3 0.24, L4 2.44, L5 13.54, L6 0.00
+  host 쓰기(근사)  : 328.4 GiB (compaction+flush 315.0, WAL 13.4; overwrite 프로세스 전체 = 실행+대기)
+  MANIFEST 비중    : 0.021% (최대 파일 크기 기준 근사)
